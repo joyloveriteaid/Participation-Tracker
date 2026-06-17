@@ -58,11 +58,19 @@ const STORAGE_BASE = "pt_v2_";
 const loadPeriodData = (period) => {
   try {
     const raw = localStorage.getItem(STORAGE_BASE + period);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const data = JSON.parse(raw);
+      // Migrate old data: add history/totalPoints if missing
+      return data.map(s => ({
+        ...s,
+        history: s.history || [],
+        totalPoints: s.totalPoints != null ? s.totalPoints : s.points,
+      }));
+    }
   } catch(e) {}
   return DEFAULT_STUDENTS[period].map(name => ({
     name, points: 0, log: [], attendance: "absent",
-    notes: "", parentNote: ""
+    notes: "", parentNote: "", history: [], totalPoints: 0
   }));
 };
 
@@ -162,7 +170,33 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
       : s.points === 0 ? s.name + " attended class. Encouraging more participation would be beneficial."
       : s.name + " had some challenges with participation this period.";
 
-    const noActivity = s.log.length === 0 ? '<div style="font-size:12px;color:#bbb;text-align:center;padding:8px">No activity recorded</div>' : "";
+    const totalPts = (s.totalPoints || 0) + s.points;
+    const historyRows = (s.history || []).map(function(day) {
+      const dayPtColor = day.points > 0 ? "#2E7D5E" : day.points < 0 ? "#C0392B" : "#888";
+      const dayPts = (day.points > 0 ? "+" : "") + day.points;
+      const dayAtt = day.attendance === "present" ? "✅" : "❌";
+      const dayCats = CATEGORIES.filter(function(c) {
+        return (day.log || []).some(function(l) { return l.label === c.label; });
+      }).map(function(cat) {
+        const count = (day.log || []).filter(function(l) { return l.label === cat.label; }).length;
+        return cat.emoji + " " + cat.label + " ×" + count;
+      }).join(" · ");
+      return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:11px">'
+        + '<span style="color:#888;min-width:80px">' + day.date + '</span>'
+        + '<span>' + dayAtt + '</span>'
+        + '<span style="flex:1;color:#666">' + (dayCats || "No activity") + '</span>'
+        + '<span style="font-weight:700;color:' + dayPtColor + '">' + dayPts + '</span>'
+        + '</div>';
+    }).join("");
+
+    const historySection = (s.history || []).length > 0
+      ? '<div style="border-top:2px solid #E8EBF0;margin-top:10px;padding-top:10px">'
+        + '<div style="font-size:10px;font-weight:700;color:#9B6DD1;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">📅 History (' + s.history.length + ' days)</div>'
+        + historyRows
+        + '</div>'
+      : "";
+
+    const noActivity = s.log.length === 0 ? '<div style="font-size:12px;color:#bbb;text-align:center;padding:8px">No activity today</div>' : "";
     const msgHTML = reportMode === "full" && s.log.length > 0 ? '<div style="background:#F8F9FC;border-radius:6px;padding:8px;font-size:11px;color:#555;line-height:1.5;margin-bottom:8px">' + msg + '</div>' : "";
     const logSection = reportMode === "full" && s.log.length > 0 ? '<div style="border-top:1px solid #F0F2F6;padding-top:8px;margin-top:6px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Activity Log</div>' + logRows + '</div>' : "";
     const noteHTML = s.parentNote ? '<div style="background:#FFFBEA;border:1px solid #FFD166;border-radius:6px;padding:6px 10px;font-size:11px;color:#7A5200;margin-top:8px"><b>Note:</b> ' + s.parentNote + '</div>' : "";
@@ -177,13 +211,14 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
           + '</div>'
         + '</div>'
         + '<div style="text-align:right">'
-          + '<div style="font-size:24px;font-weight:800;color:' + ptColor + '">' + ptStr + '</div>'
-          + '<div style="font-size:10px;color:#aaa">pts today</div>'
+          + '<div style="font-size:22px;font-weight:800;color:' + ptColor + '">' + ptStr + '</div>'
+          + '<div style="font-size:9px;color:#aaa">today</div>'
+          + '<div style="font-size:13px;font-weight:700;color:#9B6DD1">' + totalPts + ' total</div>'
         + '</div>'
       + '</div>'
-      + '<div style="padding:10px 14px">' + noActivity + catRows + msgHTML + logSection + noteHTML + '</div>'
+      + '<div style="padding:10px 14px">' + noActivity + catRows + msgHTML + logSection + historySection + noteHTML + '</div>'
       + '<div style="background:#F8F9FC;border-top:1px solid #F0F2F6;padding:6px 14px;display:flex;justify-content:space-between">'
-        + '<span style="font-size:10px;color:#bbb">' + s.log.length + ' events</span>'
+        + '<span style="font-size:10px;color:#bbb">' + (s.history || []).length + ' days tracked</span>'
         + '<span style="font-size:10px;color:#bbb">' + className + ' · ' + period + '</span>'
       + '</div>'
       + '</div>';
@@ -337,10 +372,11 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                             </div>
                           </div>
                           <div style={{ textAlign:"right" }}>
-                            <div style={{ fontSize:26, fontWeight:800, color:getPointColor(s.points), lineHeight:1 }}>
+                            <div style={{ fontSize:22, fontWeight:800, color:getPointColor(s.points), lineHeight:1 }}>
                               {s.points > 0 ? "+" : ""}{s.points}
                             </div>
-                            <div style={{ fontSize:10, color:"#aaa" }}>pts today</div>
+                            <div style={{ fontSize:9, color:"#aaa" }}>today</div>
+                            <div style={{ fontSize:13, fontWeight:700, color:"#9B6DD1" }}>{(s.totalPoints||0) + s.points} total</div>
                           </div>
                         </div>
 
@@ -409,11 +445,34 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                               📝 <strong>Note:</strong> {s.parentNote}
                             </div>
                           )}
+
+                          {/* History */}
+                          {(s.history||[]).length > 0 && (
+                            <div style={{ borderTop:"2px solid #E8EBF0", marginTop:10, paddingTop:10 }}>
+                              <div style={{ fontSize:10, fontWeight:700, color:"#9B6DD1", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
+                                📅 History ({s.history.length} days)
+                              </div>
+                              {s.history.map((day, di) => {
+                                const dayPtColor = day.points > 0 ? "#2E7D5E" : day.points < 0 ? "#C0392B" : "#888";
+                                const dayPts = (day.points > 0 ? "+" : "") + day.points;
+                                const dayCats = CATEGORIES.filter(c => (day.log||[]).some(l => l.label === c.label))
+                                  .map(c => c.emoji + " " + c.label).join(" · ");
+                                return (
+                                  <div key={di} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0", borderBottom:"1px solid #f5f5f5", fontSize:11 }}>
+                                    <span style={{ color:"#999", minWidth:70, fontSize:10 }}>{day.date}</span>
+                                    <span>{day.attendance === "present" ? "✅" : "❌"}</span>
+                                    <span style={{ flex:1, color:"#666", fontSize:10 }}>{dayCats || "No activity"}</span>
+                                    <span style={{ fontWeight:700, color:dayPtColor }}>{dayPts}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
 
                         {/* Bottom strip */}
                         <div style={{ background:"#F8F9FC", borderTop:"1px solid #F0F2F6", padding:"6px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                          <div style={{ fontSize:10, color:"#bbb" }}>{s.log.length} event{s.log.length !== 1 ? "s" : ""} logged</div>
+                          <div style={{ fontSize:10, color:"#9B6DD1", fontWeight:700 }}>{(s.history||[]).length} days tracked</div>
                           <button onClick={() => { const html = buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, className, dateLabel, { name: s.name, period }); if (html) { onPrint(html); onClose(); } }}
                             style={{ background:"none", border:"1px solid #E0E4EC", borderRadius:6, padding:"3px 10px", fontSize:10, color:"#888", cursor:"pointer", fontWeight:600 }}>
                             🖨️ Print this student
@@ -590,7 +649,7 @@ function App() {
     const trimmed = newName.trim();
     if (!trimmed) return;
     snapshot();
-    setStudents(prev => [...prev, { name:trimmed, points:0, log:[], attendance:"absent", notes:"", parentNote:"" }]);
+    setStudents(prev => [...prev, { name:trimmed, points:0, log:[], attendance:"absent", notes:"", parentNote:"", history:[], totalPoints:0 }]);
     setNewName("");
   };
 
@@ -600,12 +659,26 @@ function App() {
     if (selected === idx) setSelected(null);
   };
 
-  const resetAll = () => {
+  const endDay = () => {
     snapshot();
-    setStudents(prev => prev.map(s => ({ ...s, points:0, log:[] })));
+    const today = getTodayStr();
+    setStudents(prev => prev.map(s => {
+      const dayRecord = { date: today, points: s.points, log: s.log, attendance: s.attendance };
+      const newHistory = [dayRecord, ...(s.history || [])];
+      const newTotal = (s.totalPoints || 0) + s.points;
+      return { ...s, points: 0, log: [], history: newHistory, totalPoints: newTotal };
+    }));
     setSelected(null); setResetConfirm(false);
     setGiveAllHistory([]);
-    showUndoMsg("Points reset");
+    showUndoMsg("Day saved — points archived, totals updated");
+  };
+
+  const resetAll = () => {
+    snapshot();
+    setStudents(prev => prev.map(s => ({ ...s, points:0, log:[], history:[], totalPoints:0 })));
+    setSelected(null); setResetConfirm(false);
+    setGiveAllHistory([]);
+    showUndoMsg("All data cleared");
   };
 
   const saveNote = () => {
@@ -656,7 +729,7 @@ function App() {
   // Cross-period summary for header badges
   const periodSummary = PERIODS.map(p => {
     const d = allPeriodData[p] || [];
-    return { p, present: d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0) };
+    return { p, present: d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0), total_pts:d.reduce((a,s)=>a+(s.totalPoints||0)+s.points,0) };
   });
 
   const sorted = [...students].map((s,i) => ({ ...s, origIdx:i })).sort((a,b) => b.points - a.points);
@@ -700,13 +773,14 @@ function App() {
             </button>
             {resetConfirm ? (
               <div style={{ display:"flex", gap:6, alignItems:"center", background:"rgba(224,92,92,0.2)", border:"1px solid #E05C5C", borderRadius:8, padding:"4px 8px" }}>
-                <span style={{ fontSize:12, color:"#FFB3B3" }}>Reset?</span>
-                <button onClick={resetAll} style={{ background:"#E05C5C", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yes</button>
-                <button onClick={() => setResetConfirm(false)} style={{ background:"rgba(255,255,255,0.1)", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer" }}>No</button>
+                <span style={{ fontSize:11, color:"#FFB3B3" }}>Archive today?</span>
+                <button onClick={endDay} style={{ background:"#4C9B82", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✓ End Day</button>
+                <button onClick={resetAll} style={{ background:"#E05C5C", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✕ Clear All</button>
+                <button onClick={() => setResetConfirm(false)} style={{ background:"rgba(255,255,255,0.1)", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer" }}>Cancel</button>
               </div>
             ) : (
               <button onClick={() => setResetConfirm(true)} style={{ background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.7)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer" }}>
-                ↺ Reset
+                ↺ End Day
               </button>
             )}
           </div>
@@ -723,7 +797,7 @@ function App() {
                 style={{ background: isActive ? "white" : "rgba(255,255,255,0.07)", color: isActive ? ppc.text : "rgba(255,255,255,0.6)", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 16px", fontSize:13, cursor:"pointer", fontWeight:isActive?700:500, position:"relative", transition:"all 0.15s", flexShrink:0, minWidth:80 }}>
                 <div style={{ fontWeight:800, fontSize:14 }}>{p}</div>
                 <div style={{ fontSize:10, color: isActive ? ppc.accent : "rgba(255,255,255,0.4)", marginTop:1 }}>
-                  {ps?.present}/{ps?.total} · {ps?.pts > 0 ? "+" : ""}{ps?.pts}pts
+                  {ps?.present}/{ps?.total} · <span style={{ color:"#9B6DD1" }}>{ps?.total_pts} total</span>
                 </div>
                 {isActive && <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)", width:24, height:3, background:ppc.accent, borderRadius:"2px 2px 0 0" }} />}
               </button>
@@ -852,7 +926,12 @@ function App() {
                     <div style={{ fontSize:28, fontWeight:800, color:getPointColor(s.points), lineHeight:1 }}>
                       {s.points>0?"+":""}{s.points}
                     </div>
-                    <div style={{ fontSize:9, color:"#aaa", marginTop:2 }}>{s.attendance==="present"?"tap to award":"mark present first"}</div>
+                    <div style={{ fontSize:9, color:"#aaa", marginTop:1 }}>today</div>
+                    {(s.totalPoints || 0) > 0 && (
+                      <div style={{ fontSize:11, fontWeight:700, color:"#9B6DD1", marginTop:3 }}>
+                        {s.totalPoints} total
+                      </div>
+                    )}
                     {s.parentNote && <div style={{ fontSize:9, color:"#D4A017", marginTop:3 }}>📝 has note</div>}
                   </div>
                   {/* Footer */}
@@ -930,8 +1009,12 @@ function App() {
                       {att.icon} {att.label}
                     </button>
                   </div>
-                  <div style={{ textAlign:"right", fontWeight:800, fontSize:17, color:getPointColor(s.points), padding:"12px 0" }}>
-                    {s.points>0?"+":""}{s.points}
+                  <div style={{ textAlign:"right", padding:"10px 0" }}>
+                    <div style={{ fontWeight:800, fontSize:17, color:getPointColor(s.points) }}>
+                      {s.points>0?"+":""}{s.points}
+                    </div>
+                    <div style={{ fontSize:9, color:"#aaa" }}>today</div>
+                    {(s.totalPoints||0) > 0 && <div style={{ fontSize:11, fontWeight:700, color:"#9B6DD1" }}>{s.totalPoints} total</div>}
                   </div>
                 </div>
               );
