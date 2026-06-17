@@ -614,6 +614,45 @@ function App() {
     setEditNoteFor(null); setNoteText("");
   };
 
+  const exportData = () => {
+    const payload = { version: 1, exported: new Date().toISOString(), periods: allPeriodData };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "participation-data-" + new Date().toLocaleDateString("en-US").replace(/\//g,"-") + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        const data = parsed.periods || parsed;
+        snapshot();
+        const newData = {};
+        PERIODS.forEach(p => {
+          if (data[p]) {
+            newData[p] = data[p];
+            savePeriodData(p, data[p]);
+          } else {
+            newData[p] = allPeriodData[p];
+          }
+        });
+        setAllPeriodData(newData);
+        showUndoMsg("Data imported successfully");
+      } catch(err) {
+        alert("Could not read file. Make sure it's a valid export file.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   // Cross-period summary for header badges
   const periodSummary = PERIODS.map(p => {
     const d = allPeriodData[p] || [];
@@ -647,6 +686,14 @@ function App() {
               style={{ background:"rgba(76,155,130,0.25)", color:"#7EC8A4", border:"1px solid rgba(76,155,130,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
               📋 Reports
             </button>
+            <button onClick={exportData}
+              style={{ background:"rgba(91,141,217,0.25)", color:"#8BB4E8", border:"1px solid rgba(91,141,217,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              💾 Save Data
+            </button>
+            <label style={{ background:"rgba(155,109,209,0.25)", color:"#C4A0E8", border:"1px solid rgba(155,109,209,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              📂 Load Data
+              <input type="file" accept=".json" onChange={importData} style={{ display:"none" }} />
+            </label>
             <button onClick={undo} disabled={history.length===0}
               style={{ background:history.length>0?"rgba(255,209,102,0.2)":"rgba(255,255,255,0.05)", color:history.length>0?"#FFD166":"rgba(255,255,255,0.25)", border:`1px solid ${history.length>0?"#FFD166":"rgba(255,255,255,0.1)"}`, borderRadius:8, padding:"7px 14px", fontSize:13, cursor:history.length>0?"pointer":"default", fontWeight:600 }}>
               ↩ Undo
@@ -1003,8 +1050,9 @@ function App() {
       )}
 
       {/* ── Reports Page (full page swap) ── */}
-      {showReport && (
-        <ParentReportModal allPeriodData={allPeriodData} onClose={() => setShowReport(false)} onPrint={(html) => { window.triggerPrint(html); }} />
+      {showReport && ReactDOM.createPortal(
+        <ParentReportModal allPeriodData={allPeriodData} onClose={() => setShowReport(false)} onPrint={(html) => { window.triggerPrint(html); }} />,
+        document.body
       )}
 
     </div>
