@@ -757,7 +757,7 @@ function App() {
     };
     const url = "https://accounts.google.com/o/oauth2/v2/auth"
       + "?client_id=" + clientId
-+ "&redirect_uri=" + encodeURIComponent(window.location.href.split("?")[0])
++ "&redirect_uri=" + encodeURIComponent("https://joyloveriteaid.github.io/Participation-Tracker/")
       + "&response_type=token"
       + "&scope=" + encodeURIComponent("https://www.googleapis.com/auth/drive.file")
       + "&prompt=consent";
