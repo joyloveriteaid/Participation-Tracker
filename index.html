@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Participation Tracker</title>
-  <script src="[cdnjs.cloudflare.com](https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js)"></script>
-  <script src="[cdnjs.cloudflare.com](https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js)"></script>
-  <script src="[cdnjs.cloudflare.com](https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js)"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F0F2F6; color: #1A1A2E; }
@@ -25,7 +25,9 @@
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
+
 const PERIODS = ["P1", "P2", "P3", "P4", "P5"];
+
 const PERIOD_COLORS = {
   P1: { bg: "#E8F5F0", accent: "#4C9B82", text: "#1B5E47" },
   P2: { bg: "#EBF3FF", accent: "#5B8DD9", text: "#1B3A6B" },
@@ -33,6 +35,7 @@ const PERIOD_COLORS = {
   P4: { bg: "#FFF5E6", accent: "#E8934A", text: "#7A3D00" },
   P5: { bg: "#FFEAF0", accent: "#D4527A", text: "#7A1636" },
 };
+
 const CATEGORIES = [
   { id: "entrance",  label: "Entrance Ticket",     emoji: "🎫", points: 1,  color: "#4C9B82" },
   { id: "turntalk",  label: "Turn & Talk",          emoji: "🗣️", points: 1,  color: "#E8934A" },
@@ -40,8 +43,8 @@ const CATEGORIES = [
   { id: "vocab",     label: "Question + Vocab",     emoji: "📚", points: 1,  color: "#9B6DD1" },
   { id: "sharework", label: "Share Work Publicly",  emoji: "🌟", points: 1,  color: "#D4A017" },
   { id: "offtask",   label: "Off-Task Talking",     emoji: "🔇", points: -1, color: "#E05C5C" },
-  { id: "deviceout", label: "Device Out",           emoji: "📱", points: -1, color: "#C0392B" },
 ];
+
 const DEFAULT_STUDENTS = {
   P1: ["Aaliyah", "Brandon", "Celeste", "David", "Esther", "Felix", "Grace", "Henry"],
   P2: ["Isabel", "James", "Kira", "Leo", "Maya", "Nathan", "Olivia", "Patrick"],
@@ -49,7 +52,9 @@ const DEFAULT_STUDENTS = {
   P4: ["Yasmine", "Zachary", "Amara", "Ben", "Chloe", "Diego", "Elena", "Frank"],
   P5: ["Gina", "Hector", "Iris", "Jake", "Karen", "Luis", "Mia", "Nora"],
 };
+
 const STORAGE_BASE = "pt_v2_";
+
 const loadPeriodData = (period) => {
   try {
     const raw = localStorage.getItem(STORAGE_BASE + period);
@@ -68,17 +73,21 @@ const loadPeriodData = (period) => {
     notes: "", parentNote: "", history: [], totalPoints: 0
   }));
 };
+
 const savePeriodData = (period, students) => {
   try { localStorage.setItem(STORAGE_BASE + period, JSON.stringify(students)); } catch(e) {}
 };
+
 const getTodayStr = () => new Date().toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" });
 const getTimeStr = () => new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit" });
 const getShortDateStr = () => new Date().toLocaleDateString("en-US", { month:"short", day:"numeric" });
+
 function getAttendanceMeta(att) {
   if (att === "present") return { icon: "✅", label: "Present", color: "#4C9B82", bg: "#E8F5F0", border: "#4C9B82" };
   if (att === "absent")  return { icon: "❌", label: "Absent",  color: "#E05C5C", bg: "#FFF1F1", border: "#E05C5C" };
   return { icon: "○", label: "Mark", color: "#bbb", bg: "#F5F5F5", border: "#ddd" };
 }
+
 function getBadge(pts) {
   if (pts >= 5) return "⭐";
   if (pts >= 3) return "🌟";
@@ -91,6 +100,7 @@ function getPointColor(pts) {
 function getCardBg(pts) {
   return pts >= 5 ? "#FFF8E7" : pts < 0 ? "#FFF1F1" : "#FFFFFF";
 }
+
 // ─── REPORT GENERATION ─────────────────────────────────────────────────────
 function generateReport(period, students, dateRange) {
   const pc = PERIOD_COLORS[period];
@@ -107,8 +117,10 @@ function generateReport(period, students, dateRange) {
       .sort((a, b) => b.count - a.count);
     return { ...s, positiveLog, negativeLog, topCats };
   });
+
   return { period, pc, reportData, dateRange };
 }
+
 // ─── PRINT HTML BUILDER (outside React) ────────────────────────────────────
 function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, className, dateLabel, singleStudent) {
   const periodsData = selectedPeriod === "ALL" ? PERIODS : [selectedPeriod];
@@ -120,12 +132,14 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
       : pStudents;
     return targets.map(function(s) { return { s: s, period: period, pc: pc }; });
   });
+
   const cards = studentRows.map(function(row) {
     const s = row.s, period = row.period, pc = row.pc;
     const att = getAttendanceMeta(s.attendance);
     const initials = s.name.split(" ").map(function(n) { return n[0]; }).join("").slice(0,2).toUpperCase();
     const ptColor = s.points > 0 ? "#2E7D5E" : s.points < 0 ? "#C0392B" : "#888";
     const ptStr = (s.points > 0 ? "+" : "") + s.points;
+
     const catRows = CATEGORIES.filter(function(c) {
       return s.log.some(function(l) { return l.label === c.label; });
     }).map(function(cat) {
@@ -138,6 +152,7 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
         + '<span style="font-size:11px;font-weight:700;color:' + ptC + '">' + ptVal + '</span>'
         + '</div>';
     }).join("");
+
     const logRows = reportMode === "full" ? s.log.slice(0,8).map(function(e) {
       const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B";
       const ep = (e.pts > 0 ? "+" : "") + e.pts;
@@ -148,11 +163,13 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
         + '<span style="color:#bbb;font-size:10px">' + e.time + '</span>'
         + '</div>';
     }).join("") : "";
+
     const msg = s.points >= 5 ? "Outstanding participation! " + s.name + " has been an excellent contributor."
       : s.points >= 3 ? s.name + " showed strong engagement and made meaningful contributions."
       : s.points >= 1 ? s.name + " participated actively in class activities."
       : s.points === 0 ? s.name + " attended class. Encouraging more participation would be beneficial."
       : s.name + " had some challenges with participation this period.";
+
     const totalPts = (s.totalPoints || 0) + s.points;
     const histDisplayed = reportMode === "full" ? (s.history || []) : (s.history || []).slice(0, 3);
     const historyRows = histDisplayed.map(function(day) {
@@ -162,17 +179,13 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
         return (day.log || []).some(function(l) { return l.label === c.label; });
       });
       if (reportMode === "full") {
-        var actLines = attendedCats.filter(function(c) { return c.points > 0; }).map(function(cat) {
+        var actLines = attendedCats.filter(function(c) { return c.id !== "offtask"; }).map(function(cat) {
           var count = (day.log || []).filter(function(l) { return l.label === cat.label; }).length;
           return cat.label + (count > 1 ? " (" + count + "x)" : "");
         });
         var offTask = (day.log || []).filter(function(l) { return l.label === "Off-Task Talking"; }).length;
-        var deviceOut = (day.log || []).filter(function(l) { return l.label === "Device Out"; }).length;
-        var negatives = [];
-        if (offTask > 0) negatives.push(offTask > 1 ? "Off-Task Talking (" + offTask + "x)" : "Off-Task Talking");
-        if (deviceOut > 0) negatives.push(deviceOut > 1 ? "Device Out (" + deviceOut + "x)" : "Device Out");
-        var negStr = negatives.join(", ");
-        var actText = actLines.join(", ") + (negStr ? (actLines.length > 0 ? " · " : "") + negStr : "");
+        var offTaskStr = offTask > 0 ? (offTask > 1 ? "Off-Task Talking (" + offTask + "x)" : "Off-Task Talking") : "";
+        var actText = actLines.join(", ") + (offTaskStr ? (actLines.length > 0 ? " · " : "") + offTaskStr : "");
         var attLabel = day.attendance === "present" ? "Present" : "Absent";
         var attColor = day.attendance === "present" ? "#4C9B82" : "#E05C5C";
         return '<div style="padding:6px 0;border-bottom:1px solid #f0f0f0">'
@@ -196,23 +209,28 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
           + '</div>';
       }
     }).join("");
+
     const totalDays = (s.history||[]).length + (s.points !== 0 ? 1 : 0);
     const totalRow = reportMode === "full" && (s.history||[]).length > 0
       ? '<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-size:12px;font-weight:700;border-top:1px solid #E8EBF0;margin-top:4px"><span style="color:#555">Cumulative total (' + totalDays + ' days)</span><span style="color:#9B6DD1">' + totalPts + ' pts</span></div>'
       : "";
+
     const histLabel = reportMode === "full"
       ? 'History (' + (s.history||[]).length + ' days)'
       : 'Recent History (last ' + histDisplayed.length + ' of ' + (s.history||[]).length + ' days)';
+
     const historySection = (s.history || []).length > 0
       ? '<div style="border-top:2px solid #E8EBF0;margin-top:10px;padding-top:8px">'
         + '<div style="font-size:10px;font-weight:700;color:#9B6DD1;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">📅 ' + histLabel + '</div>'
         + historyRows + totalRow
         + '</div>'
       : "";
+
     const noActivity = s.log.length === 0 ? '<div style="font-size:12px;color:#bbb;text-align:center;padding:8px">No activity today</div>' : "";
     const msgHTML = reportMode === "full" && s.log.length > 0 ? '<div style="background:#F8F9FC;border-radius:6px;padding:8px;font-size:11px;color:#555;line-height:1.5;margin-bottom:8px">' + msg + '</div>' : "";
     const logSection = reportMode === "full" && s.log.length > 0 ? '<div style="border-top:1px solid #F0F2F6;padding-top:8px;margin-top:6px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Activity Log</div>' + logRows + '</div>' : "";
     const noteHTML = s.parentNote ? '<div style="background:#FFFBEA;border:1px solid #FFD166;border-radius:6px;padding:6px 10px;font-size:11px;color:#7A5200;margin-top:8px"><b>Note:</b> ' + s.parentNote + '</div>' : "";
+
     return '<div style="background:white;border:1.5px solid #E8EBF0;border-radius:10px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;margin-bottom:4px">'
       + '<div style="background:' + pc.bg + ';padding:10px 14px;display:flex;align-items:center;justify-content:space-between">'
         + '<div style="display:flex;align-items:center;gap:10px">'
@@ -235,10 +253,12 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
       + '</div>'
       + '</div>';
   }).join("");
+
   return '<h1 style="font-size:20px;font-weight:800;margin:0 0 4px">' + className + ' — Participation Reports</h1>'
     + '<div style="font-size:13px;color:#888;margin-bottom:20px">' + teacherName + ' · ' + dateLabel + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">' + cards + '</div>';
 }
+
 // ─── PARENT REPORT MODAL ───────────────────────────────────────────────────
 function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   const [selectedPeriod, setSelectedPeriod] = useState("ALL");
@@ -247,7 +267,9 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   const [teacherName, setTeacherName] = useState("Ms. Lin");
   const [className, setClassName] = useState("Algebra 2");
   const reportRef = useRef(null);
+
   const periodsToShow = selectedPeriod === "ALL" ? PERIODS : [selectedPeriod];
+
   const getStudentSummary = (s, period) => {
     if (s.log.length === 0) return null;
     const positives = s.log.filter(l => l.pts > 0);
@@ -259,6 +281,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
       .sort((a, b) => b.count - a.count)[0];
     return { positives, negatives, topCat };
   };
+
   const getStarMessage = (s) => {
     if (s.points >= 5) return "Outstanding participation this period! " + s.name + " has been an excellent contributor to class discussions.";
     if (s.points >= 3) return s.name + " showed strong engagement and made meaningful contributions to class.";
@@ -267,6 +290,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
     if (s.points < 0) return s.name + " had some challenges with class participation. We encourage focusing on engagement strategies at home.";
     return "";
   };
+
   return (
     <div style={{ position:"fixed", inset:0, zIndex:2000, overflowY:"auto", background:"rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }} onClick={e => e.stopPropagation()}>
@@ -278,6 +302,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
         </div>
         <button onClick={onClose} style={{ background:"rgba(255,255,255,0.15)", color:"white", border:"1px solid rgba(255,255,255,0.3)", borderRadius:8, padding:"8px 18px", cursor:"pointer", fontSize:14, fontWeight:600 }}>✕ Close</button>
       </div>
+
       {/* Controls */}
       <div style={{ background:"white", borderBottom:"1px solid #E8EBF0", padding:"14px 20px", display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end" }}>
         <div>
@@ -323,6 +348,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
           🖨️ Print / Save PDF
         </button>
       </div>
+
         {/* Report Preview */}
         <div ref={reportRef} style={{ padding:24 }}>
           {/* Print header */}
@@ -330,6 +356,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
             <div style={{ fontSize:22, fontWeight:800, color:"#1A1A2E" }}>{className} — Participation Reports</div>
             <div style={{ fontSize:14, color:"#888", marginTop:4 }}>{teacherName} · {dateLabel}</div>
           </div>
+
           {periodsToShow.map(period => {
             const students = allPeriodData[period] || [];
             const pc = PERIOD_COLORS[period];
@@ -343,6 +370,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                 </div>
               );
             }
+
             return (
               <div key={period} style={{ marginBottom:32 }}>
                 {/* Period header */}
@@ -353,6 +381,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                   <div style={{ fontSize:13, color:pc.text, opacity:0.7 }}>{teacherName}</div>
                   <div style={{ marginLeft:"auto", fontSize:13, color:pc.text, opacity:0.8 }}>{dateLabel}</div>
                 </div>
+
                 {/* Student cards grid */}
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))", gap:12 }}>
                   {students.map((s, i) => {
@@ -380,6 +409,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                             <div style={{ fontSize:13, fontWeight:700, color:"#9B6DD1" }}>{(s.totalPoints||0) + s.points} total</div>
                           </div>
                         </div>
+
                         {/* Activity breakdown */}
                         <div style={{ padding:"10px 14px" }}>
                           {s.log.length === 0 ? (
@@ -410,12 +440,14 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                                   );
                                 })}
                               </div>
+
                               {/* Summary message */}
                               {reportMode === "full" && (
                                 <div style={{ background:"#F8F9FC", borderRadius:8, padding:"8px 10px", fontSize:11, color:"#555", lineHeight:1.5, marginBottom:8 }}>
                                   {starMsg}
                                 </div>
                               )}
+
                               {/* Full log (detail mode) */}
                               {reportMode === "full" && s.log.length > 0 && (
                                 <div style={{ borderTop:"1px solid #F0F2F6", paddingTop:8 }}>
@@ -436,12 +468,14 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                               )}
                             </>
                           )}
+
                           {/* Teacher note */}
                           {s.parentNote && (
                             <div style={{ background:"#FFFBEA", border:"1px solid #FFD166", borderRadius:8, padding:"6px 10px", fontSize:11, color:"#7A5200", marginTop:8 }}>
                               📝 <strong>Note:</strong> {s.parentNote}
                             </div>
                           )}
+
                           {/* History — Summary: last 3 days compact icons; Full: all days with full activity descriptions */}
                           {(s.history||[]).length > 0 && (() => {
                             const hist = s.history;
@@ -463,16 +497,12 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                                   const attendedCats = CATEGORIES.filter(c => (day.log||[]).some(l => l.label === c.label));
                                   if (showAll) {
                                     // Full detail: written-out activity descriptions with counts
-                                    const actLines = attendedCats.filter(c => c.points > 0).map(c => {
+                                    const actLines = attendedCats.map(c => {
                                       const count = (day.log||[]).filter(l => l.label === c.label).length;
                                       const times = count > 1 ? " (" + count + "x)" : "";
                                       return c.label + times;
                                     });
                                     const offTask = (day.log||[]).filter(l => l.label === "Off-Task Talking").length;
-                                    const deviceOut = (day.log||[]).filter(l => l.label === "Device Out").length;
-                                    const negatives = [];
-                                    if (offTask > 0) negatives.push(offTask > 1 ? "Off-Task Talking (" + offTask + "x)" : "Off-Task Talking");
-                                    if (deviceOut > 0) negatives.push(deviceOut > 1 ? "Device Out (" + deviceOut + "x)" : "Device Out");
                                     return (
                                       <div key={di} style={{ padding:"6px 0", borderBottom:"1px solid #f0f0f0" }}>
                                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3 }}>
@@ -482,13 +512,13 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                                             <span style={{ fontWeight:700, color:dayPtColor, fontSize:12 }}>{dayPts} pts</span>
                                           </div>
                                         </div>
-                                        {(actLines.length > 0 || negatives.length > 0) && (
+                                        {actLines.length > 0 && (
                                           <div style={{ fontSize:11, color:"#555", lineHeight:1.6 }}>
-                                            {actLines.join(", ")}
-                                            {negatives.length > 0 && <span style={{ color:"#E05C5C" }}>{actLines.length > 0 ? " · " : ""}{negatives.join(", ")}</span>}
+                                            {actLines.filter(l => !l.startsWith("Off-Task")).join(", ")}
+                                            {offTask > 0 && <span style={{ color:"#E05C5C" }}>{actLines.filter(l => !l.startsWith("Off-Task")).length > 0 ? " · " : ""}{offTask > 1 ? "Off-Task Talking (" + offTask + "x)" : "Off-Task Talking"}</span>}
                                           </div>
                                         )}
-                                        {actLines.length === 0 && negatives.length === 0 && day.attendance === "present" && (
+                                        {actLines.length === 0 && day.attendance === "present" && (
                                           <div style={{ fontSize:11, color:"#bbb" }}>No participation recorded</div>
                                         )}
                                       </div>
@@ -516,6 +546,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                             );
                           })()}
                         </div>
+
                         {/* Bottom strip */}
                         <div style={{ background:"#F8F9FC", borderTop:"1px solid #F0F2F6", padding:"6px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                           <div style={{ fontSize:10, color:"#9B6DD1", fontWeight:700 }}>{(s.history||[]).length} days tracked</div>
@@ -529,6 +560,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                     );
                   })}
                 </div>
+
                 {/* Period stats */}
                 <div style={{ marginTop:12, display:"flex", gap:10, flexWrap:"wrap" }}>
                   {[
@@ -546,6 +578,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
               </div>
             );
           })}
+
           {/* Print footer */}
           <div className="print-only" style={{ marginTop:32, paddingTop:16, borderTop:"1px solid #eee", fontSize:11, color:"#aaa", textAlign:"center" }}>
             Generated on {getTodayStr()} · {teacherName} · {className}
@@ -555,6 +588,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
     </div>
   );
 }
+
 // ─── MAIN APP ───────────────────────────────────────────────────────────────
 function App() {
   const [activePeriod, setActivePeriod] = useState("P1");
@@ -577,8 +611,10 @@ function App() {
   const [showReport, setShowReport] = useState(false);
   const [editNoteFor, setEditNoteFor] = useState(null);
   const [noteText, setNoteText] = useState("");
+
   const students = allPeriodData[activePeriod] || [];
   const pc = PERIOD_COLORS[activePeriod];
+
   const setStudents = useCallback((updater) => {
     setAllPeriodData(prev => {
       const current = prev[activePeriod];
@@ -588,12 +624,14 @@ function App() {
       return updated;
     });
   }, [activePeriod]);
+
   // Save all periods on change
   useEffect(() => {
     setSavedToast(true);
     const t = setTimeout(() => setSavedToast(false), 1500);
     return () => clearTimeout(t);
   }, [allPeriodData]);
+
   // Close popover on outside click
   useEffect(() => {
     const handle = (e) => {
@@ -604,9 +642,11 @@ function App() {
     if (selected !== null) document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [selected]);
+
   const snapshot = () => {
     setHistory(h => [...h.slice(-19), { period: activePeriod, data: JSON.parse(JSON.stringify(allPeriodData)) }]);
   };
+
   const undo = () => {
     if (history.length === 0) return;
     const prev = history[history.length - 1];
@@ -615,11 +655,13 @@ function App() {
     PERIODS.forEach(p => savePeriodData(p, prev.data[p]));
     setUndoToast(null);
   };
+
   const showUndoMsg = (label) => {
     if (undoToast?.timeout) clearTimeout(undoToast.timeout);
     const timeout = setTimeout(() => setUndoToast(null), 4000);
     setUndoToast({ label, timeout });
   };
+
   const toggleAttendance = (idx) => {
     setStudents(prev => prev.map((s, i) => {
       if (i !== idx) return s;
@@ -627,6 +669,7 @@ function App() {
       return { ...s, attendance: next };
     }));
   };
+
   const award = (studentIdx, cat) => {
     if (students[studentIdx].attendance !== "present") return;
     snapshot();
@@ -641,7 +684,9 @@ function App() {
     }));
     showUndoMsg(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
   };
+
   const [giveAllHistory, setGiveAllHistory] = useState([]); // [{ id, cat, time, date }]
+
   const awardAll = (cat) => {
     snapshot();
     const time = getTimeStr(); const date = getShortDateStr();
@@ -655,6 +700,7 @@ function App() {
     setFlashAll(cat.id);
     setTimeout(() => setFlashAll(null), 800);
   };
+
   const removeLogEntry = (studentIdx, logIdx) => {
     snapshot();
     setStudents(prev => prev.map((s, i) => {
@@ -665,6 +711,7 @@ function App() {
     }));
     showUndoMsg(`Removed entry from ${students[studentIdx].name}`);
   };
+
   const removeLogEntryByBatch = (studentIdx, batchId) => {
     snapshot();
     setStudents(prev => prev.map((s, i) => {
@@ -674,6 +721,7 @@ function App() {
       return { ...s, points: s.points - entry.pts, log: s.log.filter(l => l.batchId !== batchId || l !== entry) };
     }));
   };
+
   const addStudent = () => {
     const trimmed = newName.trim();
     if (!trimmed) return;
@@ -681,18 +729,22 @@ function App() {
     setStudents(prev => [...prev, { name:trimmed, points:0, log:[], attendance:"absent", notes:"", parentNote:"", history:[], totalPoints:0 }]);
     setNewName("");
   };
+
   const removeStudent = (idx) => {
     snapshot();
     setStudents(prev => prev.filter((_,i) => i !== idx));
     if (selected === idx) setSelected(null);
   };
+
   const [driveStatus, setDriveStatus] = useState(() => localStorage.getItem("pt_drive_token") ? "connected" : "idle"); // idle | connecting | connected | saving | loading | error
   const [driveMsg, setDriveMsg] = useState("");
   const [showDriveSetup, setShowDriveSetup] = useState(false);
   const [driveClientId, setDriveClientId] = useState(() => localStorage.getItem("pt_drive_client_id") || "");
   const [driveClientIdInput, setDriveClientIdInput] = useState("");
+
   const getDriveToken = () => localStorage.getItem("pt_drive_token");
   const getDriveFileId = () => localStorage.getItem("pt_drive_file_id");
+
   const connectDrive = () => {
     const clientId = driveClientId || localStorage.getItem("pt_drive_client_id");
     if (!clientId) { setShowDriveSetup(true); return; }
@@ -703,11 +755,11 @@ function App() {
       setDriveMsg("Connected! Saving now…");
       setTimeout(() => saveToDrive(token), 300);
     };
-    const url = "[accounts.google.com](https://accounts.google.com/o/oauth2/v2/auth)"
+    const url = "https://accounts.google.com/o/oauth2/v2/auth"
       + "?client_id=" + clientId
-+ "&redirect_uri=" + encodeURIComponent("[joyloveriteaid.github.io](https://joyloveriteaid.github.io/Participation-Tracker/)")
++ "&redirect_uri=" + encodeURIComponent("https://joyloveriteaid.github.io/Participation-Tracker/")
       + "&response_type=token"
-      + "&scope=" + encodeURIComponent("[googleapis.com](https://www.googleapis.com/auth/drive.file)")
+      + "&scope=" + encodeURIComponent("https://www.googleapis.com/auth/drive.file")
       + "&prompt=consent";
     const w = window.open(url, "driveAuth", "width=500,height=600");
     const check = setInterval(() => {
@@ -729,6 +781,7 @@ function App() {
       if (w && w.closed) clearInterval(check);
     }, 500);
   };
+
   const saveToDrive = (token) => {
     const t = token || getDriveToken();
     if (!t) { connectDrive(); return; }
@@ -739,8 +792,8 @@ function App() {
     const doSave = (id) => {
       const method = id ? "PATCH" : "POST";
       const url = id
-        ? "[googleapis.com](https://www.googleapis.com/upload/drive/v3/files/)" + id + "?uploadType=multipart"
-        : "[googleapis.com](https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart)";
+        ? "https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=multipart"
+        : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
       const meta = JSON.stringify({ name: "participation-tracker-data.json", mimeType: "application/json" });
       const boundary = "pt_boundary_123";
       const body = "--" + boundary + "\r\nContent-Type: application/json\r\n\r\n" + meta
@@ -766,7 +819,7 @@ function App() {
     };
     if (!fileId) {
       // Search for existing file first
-      fetch("[googleapis.com](https://www.googleapis.com/drive/v3/files?q=name%3D)'participation-tracker-data.json'%20and%20trashed%3Dfalse&fields=files(id)", {
+      fetch("https://www.googleapis.com/drive/v3/files?q=name%3D'participation-tracker-data.json'%20and%20trashed%3Dfalse&fields=files(id)", {
         headers: { "Authorization": "Bearer " + t }
       }).then(r => r.json()).then(res => {
         if (res.files && res.files.length > 0) {
@@ -776,6 +829,7 @@ function App() {
       }).catch(() => doSave(null));
     } else { doSave(fileId); }
   };
+
   const loadFromDrive = () => {
     const t = getDriveToken();
     if (!t) { connectDrive(); return; }
@@ -783,7 +837,7 @@ function App() {
     if (!fileId) { setDriveMsg("No saved file found. Save first."); return; }
     setDriveStatus("loading");
     setDriveMsg("Loading from Drive…");
-    fetch("[googleapis.com](https://www.googleapis.com/drive/v3/files/)" + fileId + "?alt=media", {
+    fetch("https://www.googleapis.com/drive/v3/files/" + fileId + "?alt=media", {
       headers: { "Authorization": "Bearer " + t }
     }).then(r => r.json()).then(data => {
       const periods = data.periods || data;
@@ -796,12 +850,14 @@ function App() {
       showUndoMsg("Data loaded from Drive");
     }).catch(() => { setDriveStatus("error"); setDriveMsg("Load failed — try reconnecting"); });
   };
+
   const saveDriveClientId = () => {
     localStorage.setItem("pt_drive_client_id", driveClientIdInput);
     setDriveClientId(driveClientIdInput);
     setShowDriveSetup(false);
     setTimeout(connectDrive, 100);
   };
+
   // Auto-save to Drive on End Day if connected
   const endDay = () => {
     snapshot();
@@ -817,6 +873,7 @@ function App() {
     showUndoMsg("Day saved — points archived");
     if (getDriveToken()) setTimeout(() => saveToDrive(), 500);
   };
+
   const resetAll = () => {
     snapshot();
     setStudents(prev => prev.map(s => ({ ...s, points:0, log:[], history:[], totalPoints:0 })));
@@ -824,15 +881,18 @@ function App() {
     setGiveAllHistory([]);
     showUndoMsg("All data cleared");
   };
+
   const saveNote = () => {
     if (editNoteFor === null) return;
     setStudents(prev => prev.map((s,i) => i === editNoteFor ? { ...s, parentNote: noteText } : s));
     setEditNoteFor(null); setNoteText("");
   };
+
   const [sheetsUrl, setSheetsUrl] = useState(() => localStorage.getItem("pt_sheets_url") || "");
   const [sheetsToast, setSheetsToast] = useState(null);
   const [showSheetsSetup, setShowSheetsSetup] = useState(false);
   const [sheetsUrlInput, setSheetsUrlInput] = useState("");
+
   const exportToSheets = () => {
     if (!sheetsUrl) { setShowSheetsSetup(true); setSheetsUrlInput(""); return; }
     const rows = [["Period","Student","Total Points","Today Pts","Attendance","Days Tracked","Date Exported"]];
@@ -855,12 +915,14 @@ function App() {
       .catch(() => setSheetsToast({ msg: "✓ Sent! (no-cors — check your sheet)", ok: true }));
     setTimeout(() => setSheetsToast(null), 4000);
   };
+
   const saveSheetsUrl = () => {
     localStorage.setItem("pt_sheets_url", sheetsUrlInput);
     setSheetsUrl(sheetsUrlInput);
     setShowSheetsSetup(false);
     showUndoMsg("Google Sheets URL saved");
   };
+
   const exportData = () => {
     const payload = { version: 1, exported: new Date().toISOString(), periods: allPeriodData };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -871,6 +933,7 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
   const importData = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -898,14 +961,18 @@ function App() {
     reader.readAsText(file);
     e.target.value = "";
   };
+
   // Cross-period summary for header badges
   const periodSummary = PERIODS.map(p => {
     const d = allPeriodData[p] || [];
     return { p, present: d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0), total_pts:d.reduce((a,s)=>a+(s.totalPoints||0)+s.points,0) };
   });
+
   const sorted = [...students].map((s,i) => ({ ...s, origIdx:i })).sort((a,b) => b.points - a.points);
+
   return (
     <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }}>
+
       {/* ── Top Header ── */}
       <div className="no-print" style={{ background:"linear-gradient(135deg,#1A1A2E 0%,#16213E 100%)", color:"white", padding:"16px 20px 0" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:12 }}>
@@ -974,6 +1041,7 @@ function App() {
             )}
           </div>
         </div>
+
         {/* ── Period Tabs ── */}
         <div style={{ display:"flex", gap:4, overflowX:"auto" }}>
           {PERIODS.map(p => {
@@ -993,10 +1061,11 @@ function App() {
           })}
         </div>
       </div>
+
       {/* ── Give All / Legend strip ── */}
       <div className="no-print" style={{ background:"white", borderBottom:"1px solid #E8EBF0", padding:"10px 20px", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
         <div style={{ fontSize:12, fontWeight:700, color:"#555", whiteSpace:"nowrap" }}>👥 Give all:</div>
-        {CATEGORIES.filter(c => ["entrance","turntalk","offtask","deviceout"].includes(c.id)).map(cat => (
+        {CATEGORIES.filter(c => ["entrance","turntalk","offtask"].includes(c.id)).map(cat => (
           <button key={cat.id} onClick={() => awardAll(cat)}
             style={{ background:flashAll===cat.id?cat.color:`${cat.color}18`, color:flashAll===cat.id?"white":cat.color, border:`1.5px solid ${cat.color}`, borderRadius:8, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", transition:"all 0.15s" }}>
             {cat.emoji} {cat.label} <span style={{ opacity:0.7 }}>({cat.points>0?"+":""}{cat.points} all)</span>
@@ -1011,7 +1080,9 @@ function App() {
           ))}
         </div>
       </div>
+
       <div style={{ padding:"16px 20px", maxWidth:1100, margin:"0 auto" }}>
+
         {/* ── Give All Quick-Undo Panel ── */}
         {giveAllHistory.length > 0 && (
           <div className="no-print" style={{ marginBottom:14 }}>
@@ -1058,6 +1129,7 @@ function App() {
             })}
           </div>
         )}
+
         {/* Attendance + Add row */}
         <div className="no-print" style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
           <div style={{ background:"white", borderRadius:12, border:"1px solid #E8EBF0", padding:"10px 16px", display:"flex", alignItems:"center", gap:12, flexShrink:0, flex:1 }}>
@@ -1081,6 +1153,7 @@ function App() {
             <button onClick={addStudent} style={{ background:pc.accent, color:"white", border:"none", borderRadius:10, padding:"9px 16px", fontSize:13, fontWeight:700, cursor:"pointer" }}>+ Add</button>
           </div>
         </div>
+
         {/* ── Grid View ── */}
         {view === "grid" && (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(155px, 1fr))", gap:10 }}>
@@ -1161,6 +1234,7 @@ function App() {
             })}
           </div>
         )}
+
         {/* ── Leaderboard View ── */}
         {view === "leaderboard" && (
           <div style={{ background:"white", borderRadius:14, overflow:"hidden", boxShadow:"0 4px 20px rgba(0,0,0,0.07)" }}>
@@ -1203,6 +1277,7 @@ function App() {
             })}
           </div>
         )}
+
         {/* Activity summary footer */}
         <div style={{ marginTop:16, display:"flex", gap:10, flexWrap:"wrap" }}>
           {CATEGORIES.map(cat => {
@@ -1216,6 +1291,7 @@ function App() {
             );
           })}
         </div>
+
         {/* Absent list */}
         <div className="no-print" style={{ marginTop:14, background:"white", borderRadius:12, border:"1.5px solid #E05C5C30", padding:"12px 16px" }}>
           <div style={{ fontSize:12, fontWeight:700, color:"#E05C5C", marginBottom:8 }}>
@@ -1236,6 +1312,7 @@ function App() {
           </div>
         </div>
       </div>
+
       {/* ── Award Popover ── */}
       {selected !== null && popoverPos && ReactDOM.createPortal(
         <div ref={popoverRef} style={{
@@ -1279,6 +1356,7 @@ function App() {
         </div>,
         document.body
       )}
+
       {/* ── Undo Toast ── */}
       {undoToast && (
         <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#1A1A2E", color:"white", borderRadius:12, padding:"10px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 6px 24px rgba(0,0,0,0.3)", zIndex:999, fontSize:13, border:"1px solid rgba(255,255,255,0.1)", whiteSpace:"nowrap" }}>
@@ -1287,6 +1365,7 @@ function App() {
           <button onClick={() => setUndoToast(null)} style={{ background:"none", border:"none", color:"#666", fontSize:15, cursor:"pointer" }}>✕</button>
         </div>
       )}
+
       {/* ── Parent Note Modal ── */}
       {editNoteFor !== null && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
@@ -1308,11 +1387,13 @@ function App() {
           </div>
         </div>
       )}
+
       {/* ── Reports Page (full page swap) ── */}
       {showReport && ReactDOM.createPortal(
         <ParentReportModal allPeriodData={allPeriodData} onClose={() => setShowReport(false)} onPrint={(html) => { window.triggerPrint(html); }} />,
         document.body
       )}
+
       {/* ── Sheets Setup Modal ── */}
       {showSheetsSetup && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
@@ -1339,7 +1420,7 @@ function App() {
             </div>
             <label style={{ fontSize:12, fontWeight:700, color:"#555", display:"block", marginBottom:6 }}>Web App URL</label>
             <input value={sheetsUrlInput} onChange={e => setSheetsUrlInput(e.target.value)}
-              placeholder="[script.google.com](https://script.google.com/macros/s/)"
+              placeholder="https://script.google.com/macros/s/..."
               style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:13, outline:"none", marginBottom:16 }} />
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
               <button onClick={() => setShowSheetsSetup(false)}
@@ -1350,6 +1431,7 @@ function App() {
           </div>
         </div>
       )}
+
       {/* ── Drive Setup Modal ── */}
       {showDriveSetup && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
@@ -1383,6 +1465,7 @@ function App() {
           </div>
         </div>
       )}
+
       {/* ── Drive Status Toast ── */}
       {driveMsg && (
         <div style={{ position:"fixed", bottom:24, right:24, background:"#1A1A2E", color:"white", borderRadius:12, padding:"10px 16px", fontSize:13, border:"1px solid rgba(66,133,244,0.5)", boxShadow:"0 6px 24px rgba(0,0,0,0.3)", zIndex:998, display:"flex", alignItems:"center", gap:10, maxWidth:320 }}>
@@ -1396,11 +1479,14 @@ function App() {
           {sheetsToast.ok && <button onClick={() => setSheetsUrl("")} style={{ background:"none", border:"1px solid #4C9B82", borderRadius:6, color:"#7EC8A4", fontSize:11, padding:"2px 8px", cursor:"pointer" }}>Change URL</button>}
         </div>
       )}
+
     </div>
   );
 }
+
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
+
 <script>
 // Plain JS - no Babel - handles printing
 window.triggerPrint = function(html) {
