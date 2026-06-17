@@ -9,600 +9,1024 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F5F7FA; color: #1A1A2E; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F0F2F6; color: #1A1A2E; }
     button { font-family: inherit; }
-    input { font-family: inherit; }
+    input, select, textarea { font-family: inherit; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      body { background: white; }
+      .report-card { page-break-inside: avoid; }
+    }
+    .print-only { display: none; }
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
 
-    const CATEGORIES = [
-      { id: "entrance", label: "Entrance Ticket", emoji: "🎫", points: 1, color: "#4C9B82" },
-      { id: "turntalk", label: "Turn and Talk", emoji: "🗣️", points: 1, color: "#E8934A" },
-      { id: "reasoning", label: "Answer + Reasoning", emoji: "🧠", points: 1, color: "#5B8DD9" },
-      { id: "vocab", label: "Question + Vocabulary", emoji: "📚", points: 1, color: "#9B6DD1" },
-      { id: "sharework", label: "Share Work Publicly", emoji: "🌟", points: 1, color: "#D4A017" },
-      { id: "offtask", label: "Off-Task Talking", emoji: "🔇", points: -1, color: "#E05C5C" },
-    ];
+const PERIODS = ["P1", "P2", "P3", "P4", "P5"];
 
-    const DEFAULT_STUDENTS = [
-      "Aaliyah", "Brandon", "Celeste", "David", "Esther",
-      "Felix", "Grace", "Henry", "Isabel", "James",
-      "Kira", "Leo", "Maya", "Nathan", "Olivia",
-    ];
+const PERIOD_COLORS = {
+  P1: { bg: "#E8F5F0", accent: "#4C9B82", text: "#1B5E47" },
+  P2: { bg: "#EBF3FF", accent: "#5B8DD9", text: "#1B3A6B" },
+  P3: { bg: "#F3EEFF", accent: "#9B6DD1", text: "#3D1A80" },
+  P4: { bg: "#FFF5E6", accent: "#E8934A", text: "#7A3D00" },
+  P5: { bg: "#FFEAF0", accent: "#D4527A", text: "#7A1636" },
+};
 
-    const STORAGE_KEY = "participation_tracker_students";
+const CATEGORIES = [
+  { id: "entrance",  label: "Entrance Ticket",     emoji: "🎫", points: 1,  color: "#4C9B82" },
+  { id: "turntalk",  label: "Turn & Talk",          emoji: "🗣️", points: 1,  color: "#E8934A" },
+  { id: "reasoning", label: "Answer + Reasoning",   emoji: "🧠", points: 1,  color: "#5B8DD9" },
+  { id: "vocab",     label: "Question + Vocab",     emoji: "📚", points: 1,  color: "#9B6DD1" },
+  { id: "sharework", label: "Share Work Publicly",  emoji: "🌟", points: 1,  color: "#D4A017" },
+  { id: "offtask",   label: "Off-Task Talking",     emoji: "🔇", points: -1, color: "#E05C5C" },
+];
 
-    const POINTS_KEY = "participation_tracker_points";
-    const EXPORT_KEY = "participation_tracker_export";
+const DEFAULT_STUDENTS = {
+  P1: ["Aaliyah", "Brandon", "Celeste", "David", "Esther", "Felix", "Grace", "Henry"],
+  P2: ["Isabel", "James", "Kira", "Leo", "Maya", "Nathan", "Olivia", "Patrick"],
+  P3: ["Quinn", "Rosa", "Samuel", "Talia", "Ulric", "Vera", "Wesley", "Xena"],
+  P4: ["Yasmine", "Zachary", "Amara", "Ben", "Chloe", "Diego", "Elena", "Frank"],
+  P5: ["Gina", "Hector", "Iris", "Jake", "Karen", "Luis", "Mia", "Nora"],
+};
 
-    const loadStudents = () => {
-      const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-      let savedPoints = {};
-      try {
-        const raw = localStorage.getItem(POINTS_KEY);
-        if (raw) savedPoints = JSON.parse(raw);
-      } catch (e) {}
-      return DEFAULT_STUDENTS.map((name) => ({
-        name,
-        points: savedPoints[name] || 0,
-        log: [],
-        attendance: "absent",
-        absentDate: today,
-      }));
-    };
+const STORAGE_BASE = "pt_v2_";
 
-    function App() {
-      const [students, setStudents] = useState(loadStudents);
-      const [history, setHistory] = useState([]);
-      const [selected, setSelected] = useState(null);
-      const [popoverPos, setPopoverPos] = useState(null);
-      const popoverRef = useRef(null);
-      const [newName, setNewName] = useState("");
-      const [view, setView] = useState("grid");
-      const [showLog, setShowLog] = useState(null);
-      const [flashAll, setFlashAll] = useState(null);
-      const [resetConfirm, setResetConfirm] = useState(false);
-      const [undoToast, setUndoToast] = useState(null);
-      const [savedToast, setSavedToast] = useState(false);
+const loadPeriodData = (period) => {
+  try {
+    const raw = localStorage.getItem(STORAGE_BASE + period);
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return DEFAULT_STUDENTS[period].map(name => ({
+    name, points: 0, log: [], attendance: "absent",
+    notes: "", parentNote: ""
+  }));
+};
 
-      // Auto-export previous session data on page load (only confirmed, non-undone actions)
-      useEffect(() => {
-        try {
-          const saved = localStorage.getItem(EXPORT_KEY);
-          if (saved) {
-            const prev = JSON.parse(saved);
-            const hasData = prev.some(s => s.points !== 0 || (s.log && s.log.length > 0));
-            if (hasData) {
-              const rows = [["Date", "Student", "Attendance", "Total Points", "Activity", "Points", "Time"]];
-              const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-              prev.forEach(s => {
-                if (!s.log || s.log.length === 0) {
-                  rows.push([today, s.name, s.attendance || "—", s.points, "—", "—", "—"]);
-                } else {
-                  s.log.forEach((entry, i) => {
-                    rows.push([entry.date || today, s.name, i === 0 ? (s.attendance || "—") : "", i === 0 ? s.points : "", entry.label, entry.pts, entry.time]);
-                  });
-                }
-              });
-              const url = SHEETS_URL + "?data=" + encodeURIComponent(JSON.stringify(rows));
-              fetch(url, { mode: "no-cors" }).catch(() => {});
-              localStorage.removeItem(EXPORT_KEY);
-              setExportToast({ ok: true, msg: "Previous session auto-exported ✓" });
-            }
-          }
-        } catch(e) {}
-      }, []);
+const savePeriodData = (period, students) => {
+  try { localStorage.setItem(STORAGE_BASE + period, JSON.stringify(students)); } catch(e) {}
+};
 
-      useEffect(() => {
-        const handleClickOutside = (e) => {
-          if (popoverRef.current && !popoverRef.current.contains(e.target)) {
-            setSelected(null);
-            setPopoverPos(null);
-          }
-        };
-        if (selected !== null) document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-      }, [selected]);
+const getTodayStr = () => new Date().toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" });
+const getTimeStr = () => new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit" });
+const getShortDateStr = () => new Date().toLocaleDateString("en-US", { month:"short", day:"numeric" });
 
-      const toggleAttendance = (idx) => {
-        const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-        setStudents((prev) => prev.map((s, i) => {
-          if (i !== idx) return s;
-          const next = s.attendance === "present" ? "absent" : "present";
-          return { ...s, attendance: next, absentDate: next === "absent" ? today : s.absentDate };
-        }));
-      };
+function getAttendanceMeta(att) {
+  if (att === "present") return { icon: "✅", label: "Present", color: "#4C9B82", bg: "#E8F5F0", border: "#4C9B82" };
+  if (att === "absent")  return { icon: "❌", label: "Absent",  color: "#E05C5C", bg: "#FFF1F1", border: "#E05C5C" };
+  return { icon: "○", label: "Mark", color: "#bbb", bg: "#F5F5F5", border: "#ddd" };
+}
 
-      useEffect(() => {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
-          // Persist accumulated points separately by name
-          const pts = {};
-          students.forEach(s => { pts[s.name] = s.points; });
-          localStorage.setItem(POINTS_KEY, JSON.stringify(pts));
-          setSavedToast(true);
-          const t = setTimeout(() => setSavedToast(false), 1500);
-          return () => clearTimeout(t);
-        } catch (e) {}
-      }, [students]);
+function getBadge(pts) {
+  if (pts >= 5) return "⭐";
+  if (pts >= 3) return "🌟";
+  if (pts < 0)  return "⚠️";
+  return null;
+}
+function getPointColor(pts) {
+  return pts > 0 ? "#2E7D5E" : pts < 0 ? "#C0392B" : "#888";
+}
+function getCardBg(pts) {
+  return pts >= 5 ? "#FFF8E7" : pts < 0 ? "#FFF1F1" : "#FFFFFF";
+}
 
-      const snapshot = (current) => {
-        setHistory((h) => [...h.slice(-19), current]);
-      };
+// ─── REPORT GENERATION ─────────────────────────────────────────────────────
+function generateReport(period, students, dateRange) {
+  const pc = PERIOD_COLORS[period];
+  const presentStudents = students.filter(s => s.log.length > 0 || s.attendance === "present");
+  const totalDays = 1; // Could be extended for multi-day tracking
+  
+  const reportData = students.map(s => {
+    const positiveLog = s.log.filter(l => l.pts > 0);
+    const negativeLog = s.log.filter(l => l.pts < 0);
+    const topCats = CATEGORIES
+      .filter(c => c.points > 0)
+      .map(c => ({ ...c, count: s.log.filter(l => l.label === c.label).length }))
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.count - a.count);
+    return { ...s, positiveLog, negativeLog, topCats };
+  });
 
-      const saveExport = (studentList) => {
-        try { localStorage.setItem(EXPORT_KEY, JSON.stringify(studentList)); } catch(e) {}
-      };
+  return { period, pc, reportData, dateRange };
+}
 
-      const showUndoToast = (label) => {
-        if (undoToast && undoToast.timeout) clearTimeout(undoToast.timeout);
-        const timeout = setTimeout(() => setUndoToast(null), 4000);
-        setUndoToast({ label, timeout });
-      };
+// ─── PRINT HTML BUILDER (outside React) ────────────────────────────────────
+function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, className, dateLabel, singleStudent) {
+  const periodsData = selectedPeriod === "ALL" ? PERIODS : [selectedPeriod];
+  const studentRows = periodsData.flatMap(function(period) {
+    const pStudents = allPeriodData[period] || [];
+    const pc = PERIOD_COLORS[period];
+    const targets = singleStudent
+      ? pStudents.filter(function(s) { return s.name === singleStudent.name && period === singleStudent.period; })
+      : pStudents;
+    return targets.map(function(s) { return { s: s, period: period, pc: pc }; });
+  });
 
-      const undo = () => {
-        if (history.length === 0) return;
-        const prev = history[history.length - 1];
-        setHistory((h) => h.slice(0, -1));
-        setStudents(prev);
-        setUndoToast(null);
-      };
+  const cards = studentRows.map(function(row) {
+    const s = row.s, period = row.period, pc = row.pc;
+    const att = getAttendanceMeta(s.attendance);
+    const initials = s.name.split(" ").map(function(n) { return n[0]; }).join("").slice(0,2).toUpperCase();
+    const ptColor = s.points > 0 ? "#2E7D5E" : s.points < 0 ? "#C0392B" : "#888";
+    const ptStr = (s.points > 0 ? "+" : "") + s.points;
 
-      const award = (studentIdx, cat) => {
-        if (students[studentIdx].attendance !== "present") return;
-        snapshot(students);
-        const now = new Date();
-        const next = students.map((s, i) => {
-          if (i !== studentIdx) return s;
-          return {
-            ...s,
-            points: s.points + cat.points,
-            log: [
-              { label: cat.label, pts: cat.points, emoji: cat.emoji, time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), date: now.toLocaleDateString([], { month: "short", day: "numeric" }) },
-              ...s.log,
-            ],
-          };
-        });
-        setStudents(next);
-        saveExport(next);
-        showUndoToast(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
-      };
+    const catRows = CATEGORIES.filter(function(c) {
+      return s.log.some(function(l) { return l.label === c.label; });
+    }).map(function(cat) {
+      const count = s.log.filter(function(l) { return l.label === cat.label; }).length;
+      const ptVal = (cat.points > 0 ? "+" : "") + (cat.points * count);
+      const ptC = cat.points > 0 ? "#2E7D5E" : "#C0392B";
+      return '<div style="display:flex;gap:8px;margin-bottom:5px;align-items:center">'
+        + '<span>' + cat.emoji + '</span>'
+        + '<span style="font-size:11px;color:#555;flex:1">' + cat.label + '</span>'
+        + '<span style="font-size:11px;font-weight:700;color:' + ptC + '">' + ptVal + '</span>'
+        + '</div>';
+    }).join("");
 
-      const awardAll = (cat) => {
-        snapshot(students);
-        const now = new Date();
-        const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        const date = now.toLocaleDateString([], { month: "short", day: "numeric" });
-        const next = students.map((s) => {
-          if (s.attendance !== "present") return s;
-          return {
-            ...s,
-            points: s.points + cat.points,
-            log: [{ label: cat.label, pts: cat.points, emoji: cat.emoji, time, date }, ...s.log],
-          };
-        });
-        setStudents(next);
-        saveExport(next);
-        showUndoToast(`${cat.emoji} ${cat.label} → All students`);
-        setFlashAll(cat.id);
-        setTimeout(() => setFlashAll(null), 800);
-      };
+    const logRows = reportMode === "full" ? s.log.slice(0,8).map(function(e) {
+      const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B";
+      const ep = (e.pts > 0 ? "+" : "") + e.pts;
+      return '<div style="display:flex;gap:6px;padding:2px 0;font-size:11px;border-bottom:1px solid #f5f5f5">'
+        + '<span>' + e.emoji + '</span>'
+        + '<span style="flex:1;color:#555">' + e.label + '</span>'
+        + '<span style="color:' + ec + ';font-weight:700">' + ep + '</span>'
+        + '<span style="color:#bbb;font-size:10px">' + e.time + '</span>'
+        + '</div>';
+    }).join("") : "";
 
-      const addStudent = () => {
-        const trimmed = newName.trim();
-        if (!trimmed) return;
-        snapshot(students);
-        const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-        setStudents((prev) => [...prev, { name: trimmed, points: 0, log: [], attendance: "absent", absentDate: today }]);
-        setNewName("");
-      };
+    const msg = s.points >= 5 ? "Outstanding participation! " + s.name + " has been an excellent contributor."
+      : s.points >= 3 ? s.name + " showed strong engagement and made meaningful contributions."
+      : s.points >= 1 ? s.name + " participated actively in class activities."
+      : s.points === 0 ? s.name + " attended class. Encouraging more participation would be beneficial."
+      : s.name + " had some challenges with participation this period.";
 
-      const removeStudent = (idx) => {
-        snapshot(students);
-        setStudents((prev) => prev.filter((_, i) => i !== idx));
-        if (selected === idx) setSelected(null);
-      };
+    const noActivity = s.log.length === 0 ? '<div style="font-size:12px;color:#bbb;text-align:center;padding:8px">No activity recorded</div>' : "";
+    const msgHTML = reportMode === "full" && s.log.length > 0 ? '<div style="background:#F8F9FC;border-radius:6px;padding:8px;font-size:11px;color:#555;line-height:1.5;margin-bottom:8px">' + msg + '</div>' : "";
+    const logSection = reportMode === "full" && s.log.length > 0 ? '<div style="border-top:1px solid #F0F2F6;padding-top:8px;margin-top:6px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Activity Log</div>' + logRows + '</div>' : "";
+    const noteHTML = s.parentNote ? '<div style="background:#FFFBEA;border:1px solid #FFD166;border-radius:6px;padding:6px 10px;font-size:11px;color:#7A5200;margin-top:8px"><b>Note:</b> ' + s.parentNote + '</div>' : "";
 
-      const resetAll = () => {
-        snapshot(students);
-        setStudents(students.map((s) => ({ ...s, points: 0, log: [] })));
-        try { localStorage.removeItem(POINTS_KEY); } catch(e) {}
-        setSelected(null);
-        setResetConfirm(false);
-        showUndoToast("All points reset");
-      };
+    return '<div style="background:white;border:1.5px solid #E8EBF0;border-radius:10px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;margin-bottom:4px">'
+      + '<div style="background:' + pc.bg + ';padding:10px 14px;display:flex;align-items:center;justify-content:space-between">'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+          + '<div style="width:34px;height:34px;border-radius:50%;background:' + pc.accent + ';color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">' + initials + '</div>'
+          + '<div>'
+            + '<div style="font-weight:700;font-size:14px;color:' + pc.text + '">' + s.name + '</div>'
+            + '<div style="font-size:11px;color:' + pc.accent + '">' + period + ' · ' + att.icon + ' ' + att.label + '</div>'
+          + '</div>'
+        + '</div>'
+        + '<div style="text-align:right">'
+          + '<div style="font-size:24px;font-weight:800;color:' + ptColor + '">' + ptStr + '</div>'
+          + '<div style="font-size:10px;color:#aaa">pts today</div>'
+        + '</div>'
+      + '</div>'
+      + '<div style="padding:10px 14px">' + noActivity + catRows + msgHTML + logSection + noteHTML + '</div>'
+      + '<div style="background:#F8F9FC;border-top:1px solid #F0F2F6;padding:6px 14px;display:flex;justify-content:space-between">'
+        + '<span style="font-size:10px;color:#bbb">' + s.log.length + ' events</span>'
+        + '<span style="font-size:10px;color:#bbb">' + className + ' · ' + period + '</span>'
+      + '</div>'
+      + '</div>';
+  }).join("");
 
-      const [exporting, setExporting] = useState(false);
-      const [exportToast, setExportToast] = useState(null);
+  return '<h1 style="font-size:20px;font-weight:800;margin:0 0 4px">' + className + ' — Participation Reports</h1>'
+    + '<div style="font-size:13px;color:#888;margin-bottom:20px">' + teacherName + ' · ' + dateLabel + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">' + cards + '</div>';
+}
 
-      const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxzaCI3zKNKDJtrMbiKP3l8v5NVOa77_RfrByVTeVRlOe6yFyilHPCr4BqL3PaLcenSYA/exec";
+// ─── PARENT REPORT MODAL ───────────────────────────────────────────────────
+function ParentReportModal({ allPeriodData, onClose, onPrint }) {
+  const [selectedPeriod, setSelectedPeriod] = useState("ALL");
+  const [reportMode, setReportMode] = useState("summary");
+  const [dateLabel, setDateLabel] = useState(`Week of ${getTodayStr()}`);
+  const [teacherName, setTeacherName] = useState("Ms. Lin");
+  const [className, setClassName] = useState("Algebra 2");
+  const reportRef = useRef(null);
 
-      const buildExportRows = (studentList) => {
-        const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-        const rows = [["Date", "Student", "Attendance", "Total Points", "Activity", "Points", "Time"]];
-        studentList.forEach(s => {
-          if (s.log.length === 0) {
-            rows.push([today, s.name, s.attendance || "—", s.points, "—", "—", "—"]);
-          } else {
-            s.log.forEach((entry, i) => {
-              rows.push([
-                entry.date || today,
-                s.name,
-                i === 0 ? (s.attendance || "—") : "",
-                i === 0 ? s.points : "",
-                entry.label,
-                entry.pts,
-                entry.time,
-              ]);
-            });
-          }
-        });
-        return rows;
-      };
+  const periodsToShow = selectedPeriod === "ALL" ? PERIODS : [selectedPeriod];
 
-      const exportToSheets = (studentList, silent = false) => {
-        const rows = buildExportRows(studentList || students);
-        const url = SHEETS_URL + "?data=" + encodeURIComponent(JSON.stringify(rows));
-        if (silent) {
-          fetch(url, { mode: "no-cors" })
-            .then(() => setExportToast({ ok: true, msg: "Auto-exported to Google Sheets ✓" }))
-            .catch(() => {});
-        } else {
-          window.open(url, "_blank");
-          setExportToast({ ok: true, msg: "Exported to Google Sheets ✓" });
-        }
-      };
+  const getStudentSummary = (s, period) => {
+    if (s.log.length === 0) return null;
+    const positives = s.log.filter(l => l.pts > 0);
+    const negatives = s.log.filter(l => l.pts < 0);
+    const topCat = CATEGORIES
+      .filter(c => c.points > 0)
+      .map(c => ({ ...c, count: s.log.filter(l => l.label === c.label).length }))
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.count - a.count)[0];
+    return { positives, negatives, topCat };
+  };
 
-      const sorted = [...students].map((s, i) => ({ ...s, origIdx: i })).sort((a, b) => b.points - a.points);
+  const getStarMessage = (s) => {
+    if (s.points >= 5) return "Outstanding participation this period! " + s.name + " has been an excellent contributor to class discussions.";
+    if (s.points >= 3) return s.name + " showed strong engagement and made meaningful contributions to class.";
+    if (s.points >= 1) return s.name + " participated actively in class activities.";
+    if (s.points === 0) return s.name + " attended class. Encouraging more participation would be beneficial.";
+    if (s.points < 0) return s.name + " had some challenges with class participation. We encourage focusing on engagement strategies at home.";
+    return "";
+  };
 
-      const getBadge = (pts) => {
-        if (pts >= 5) return { icon: "⭐" };
-        if (pts >= 3) return { icon: "🌟" };
-        if (pts < 0) return { icon: "⚠️" };
-        return null;
-      };
+  return (
+    <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }}>
+      {/* Report Header */}
+      <div style={{ background:"linear-gradient(135deg,#1A1A2E 0%,#16213E 100%)", color:"white", padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+        <div>
+          <div style={{ fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#7EC8A4", fontWeight:600 }}>Reports</div>
+          <h2 style={{ margin:0, fontSize:20, fontWeight:700 }}>Parent Communication Reports</h2>
+        </div>
+        <button onClick={onClose} style={{ background:"rgba(255,255,255,0.15)", color:"white", border:"1px solid rgba(255,255,255,0.3)", borderRadius:8, padding:"8px 18px", cursor:"pointer", fontSize:14, fontWeight:600 }}>← Back to Tracker</button>
+      </div>
 
-      const getCardBg = (pts) => pts >= 5 ? "#FFF8E7" : pts < 0 ? "#FFF1F1" : "#FFFFFF";
-      const getPointColor = (pts) => pts > 0 ? "#2E7D5E" : pts < 0 ? "#C0392B" : "#888";
-
-      const getAttendanceLabel = (att) => {
-        if (att === "present") return { icon: "✅", label: "Present", color: "#4C9B82", bg: "#E8F5F0", border: "#4C9B82" };
-        if (att === "absent") return { icon: "❌", label: "Absent", color: "#E05C5C", bg: "#FFF1F1", border: "#E05C5C" };
-        return { icon: "○", label: "Mark", color: "#bbb", bg: "#F5F5F5", border: "#ddd" };
-      };
-
-      return (
-        <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", minHeight: "100vh", background: "#F5F7FA", color: "#1A1A2E" }}>
-
-          {/* Header */}
-          <div style={{ background: "linear-gradient(135deg, #1A1A2E 0%, #16213E 100%)", color: "white", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#7EC8A4", fontWeight: 600, marginBottom: 2 }}>Classroom Tool</div>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>Participation Tracker</h1>
-              <div style={{ fontSize: 11, color: savedToast ? "#7EC8A4" : "rgba(255,255,255,0.3)", marginTop: 3, transition: "color 0.3s" }}>
-                {savedToast ? "✓ Saved to this browser" : "Auto-saves to your browser"}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 8, padding: "4px 6px", display: "flex", gap: 4 }}>
-                {["grid", "leaderboard"].map((v) => (
-                  <button key={v} onClick={() => setView(v)} style={{ background: view === v ? "#4C9B82" : "transparent", color: "white", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: view === v ? 600 : 400 }}>
-                    {v === "grid" ? "🗂 Grid" : "🏆 Rank"}
-                  </button>
-                ))}
-              </div>
-              <button onClick={exportToSheets} disabled={exporting}
-                style={{ background: exporting ? "rgba(255,255,255,0.05)" : "rgba(52,168,83,0.2)", color: exporting ? "rgba(255,255,255,0.3)" : "#6FCF97", border: "1px solid rgba(52,168,83,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: exporting ? "default" : "pointer", fontWeight: 600 }}>
-                {exporting ? "Exporting…" : "📊 Export"}
+      {/* Controls */}
+      <div style={{ background:"white", borderBottom:"1px solid #E8EBF0", padding:"14px 20px", display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-end" }}>
+        <div>
+          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:4 }}>PERIOD</label>
+          <select value={selectedPeriod} onChange={e => setSelectedPeriod(e.target.value)}
+            style={{ padding:"8px 12px", border:"2px solid #E0E4EC", borderRadius:8, fontSize:14, background:"white", cursor:"pointer" }}>
+            <option value="ALL">All Periods</option>
+            {PERIODS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:4 }}>DATE</label>
+          <input value={dateLabel} onChange={e => setDateLabel(e.target.value)}
+            style={{ padding:"8px 12px", border:"2px solid #E0E4EC", borderRadius:8, fontSize:14, width:200 }} />
+        </div>
+        <div>
+          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:4 }}>TEACHER</label>
+          <input value={teacherName} onChange={e => setTeacherName(e.target.value)}
+            style={{ padding:"8px 12px", border:"2px solid #E0E4EC", borderRadius:8, fontSize:14, width:150 }} />
+        </div>
+        <div>
+          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:4 }}>CLASS</label>
+          <input value={className} onChange={e => setClassName(e.target.value)}
+            style={{ padding:"8px 12px", border:"2px solid #E0E4EC", borderRadius:8, fontSize:14, width:130 }} />
+        </div>
+        <div>
+          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:4 }}>STYLE</label>
+          <div style={{ display:"flex", gap:4 }}>
+            {["summary","full"].map(m => (
+              <button key={m} onClick={() => setReportMode(m)}
+                style={{ background:reportMode===m?"#1A1A2E":"white", color:reportMode===m?"white":"#555", border:"2px solid "+(reportMode===m?"#1A1A2E":"#ddd"), borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer", fontWeight:reportMode===m?700:400 }}>
+                {m === "summary" ? "Summary" : "Full Detail"}
               </button>
-              <button onClick={undo} disabled={history.length === 0}
-                style={{ background: history.length > 0 ? "rgba(255,200,80,0.2)" : "rgba(255,255,255,0.05)", color: history.length > 0 ? "#FFD166" : "rgba(255,255,255,0.25)", border: `1px solid ${history.length > 0 ? "#FFD166" : "rgba(255,255,255,0.1)"}`, borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: history.length > 0 ? "pointer" : "default", fontWeight: 600 }}>
-                ↩ Undo
-              </button>
-              {resetConfirm !== "points" ? (
-                <button onClick={() => setResetConfirm("points")} style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: "pointer" }}>
-                  ↺ Points
-                </button>
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(224,92,92,0.2)", border: "1px solid #E05C5C", borderRadius: 8, padding: "4px 8px" }}>
-                  <span style={{ fontSize: 12, color: "#FFB3B3" }}>Reset points?</span>
-                  <button onClick={resetAll} style={{ background: "#E05C5C", color: "white", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Yes</button>
-                  <button onClick={() => setResetConfirm(false)} style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>No</button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Legend bar */}
-          <div style={{ background: "#1A1A2E", padding: "10px 24px 14px", display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {CATEGORIES.map((c) => (
-              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: c.color }} />
-                {c.emoji} {c.label} <span style={{ color: c.points > 0 ? "#7EC8A4" : "#E05C5C", fontWeight: 700 }}>{c.points > 0 ? "+" : ""}{c.points}</span>
-              </div>
             ))}
-            {/* Attendance legend */}
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
-              <span>📋 Attendance bar on each card → tap to cycle</span>
-            </div>
-          </div>
-
-          {/* Toasts */}
-          {undoToast && (
-            <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1A1A2E", color: "white", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", zIndex: 999, fontSize: 14, border: "1px solid rgba(255,255,255,0.1)", whiteSpace: "nowrap" }}>
-              <span style={{ color: "#aaa" }}>Awarded: <strong style={{ color: "white" }}>{undoToast.label}</strong></span>
-              <button onClick={undo} style={{ background: "#FFD166", color: "#1A1A2E", border: "none", borderRadius: 8, padding: "6px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>↩ Undo</button>
-              <button onClick={() => setUndoToast(null)} style={{ background: "none", border: "none", color: "#666", fontSize: 16, cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
-            </div>
-          )}
-
-          {exportToast && (
-            <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1A3D2E", color: "white", borderRadius: 12, padding: "14px 20px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 6px 24px rgba(0,0,0,0.35)", zIndex: 999, fontSize: 14, border: "1px solid #4C9B82", whiteSpace: "nowrap" }}>
-              <span style={{ color: "#7EC8A4" }}>✓ Data sent!</span>
-              <a href="https://docs.google.com/spreadsheets/d/1IrpQDz8xj3WLarK3JjJ0GWZl-CuFobzOd6BDwkcvxow/edit" target="_blank"
-                style={{ background: "#4C9B82", color: "white", fontWeight: 700, fontSize: 13, textDecoration: "none", borderRadius: 8, padding: "6px 14px", cursor: "pointer" }}>
-                📊 Open Google Sheet →
-              </a>
-              <button onClick={() => setExportToast(null)} style={{ background: "none", border: "none", color: "#888", fontSize: 16, cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
-            </div>
-          )}
-
-          <div style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
-
-            {/* Add student */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-              <input value={newName} onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addStudent()}
-                placeholder="Add student name…"
-                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "2px solid #E0E4EC", fontSize: 14, outline: "none", background: "white" }} />
-              <button onClick={addStudent} style={{ background: "#4C9B82", color: "white", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-                + Add
-              </button>
-            </div>
-
-            {/* Attendance summary banner */}
-            <div style={{ background: "white", borderRadius: 14, border: "2px solid #E8EBF0", padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>📋 Attendance</div>
-              <div style={{ display: "flex", gap: 12, fontSize: 13 }}>
-                <span style={{ color: "#4C9B82", fontWeight: 700 }}>✅ Present: {students.filter(s => s.attendance === "present").length}</span>
-                <span style={{ color: "#E05C5C", fontWeight: 700 }}>❌ Absent: {students.filter(s => s.attendance === "absent").length}</span>
-                <span style={{ color: "#aaa", fontWeight: 600 }}>○ Unmarked: {students.filter(s => s.attendance === null).length}</span>
-              </div>
-              <button
-                onClick={() => { snapshot(students); setStudents(prev => prev.map(s => ({ ...s, attendance: null }))); }}
-                style={{ marginLeft: "auto", background: "none", border: "1px solid #ddd", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#888", cursor: "pointer" }}>
-                Clear All
-              </button>
-              <button
-                onClick={() => { snapshot(students); const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }); setStudents(prev => prev.map(s => ({ ...s, attendance: "present" }))); showUndoToast("All marked present"); }}
-                style={{ background: "#E8F5F0", border: "1px solid #4C9B82", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#4C9B82", fontWeight: 700, cursor: "pointer" }}>
-                ✅ All Present
-              </button>
-            </div>
-
-            {/* Give All bar */}
-            <div style={{ background: "white", borderRadius: 14, border: "2px solid #E8EBF0", padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#555", whiteSpace: "nowrap" }}>👥 Give All:</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {CATEGORIES.filter((cat) => ["entrance", "turntalk", "offtask"].includes(cat.id)).map((cat) => (
-                  <button key={cat.id} onClick={() => awardAll(cat)}
-                    style={{ background: flashAll === cat.id ? cat.color : `${cat.color}18`, color: flashAll === cat.id ? "white" : cat.color, border: `2px solid ${cat.color}`, borderRadius: 9, padding: "7px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s" }}>
-                    {cat.emoji} {cat.label}
-                    <span style={{ background: flashAll === cat.id ? "rgba(255,255,255,0.3)" : `${cat.color}30`, borderRadius: 5, padding: "1px 6px", fontSize: 12 }}>
-                      {cat.points > 0 ? "+" : ""}{cat.points} all
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Grid view */}
-            {view === "grid" && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-                {students.map((s, i) => {
-                  const badge = getBadge(s.points);
-                  const flashCat = CATEGORIES.find(c => c.id === flashAll);
-                  const att = getAttendanceLabel(s.attendance);
-                  return (
-                    <div key={i}
-                      style={{ background: flashAll ? `${flashCat.color}18` : selected === i ? "#E8F5F0" : getCardBg(s.points), border: flashAll ? `2px solid ${flashCat.color}` : selected === i ? "2px solid #4C9B82" : "2px solid #E8EBF0", borderRadius: 14, overflow: "hidden", cursor: "default", transition: "all 0.15s", boxShadow: selected === i ? "0 4px 16px rgba(76,155,130,0.2)" : "0 2px 6px rgba(0,0,0,0.05)", position: "relative", opacity: s.attendance === "absent" ? 0.65 : 1 }}>
-
-                      {/* ── Attendance strip (top) ── */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); toggleAttendance(i); }}
-                        title="Click to toggle attendance"
-                        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: att.bg, border: "none", borderBottom: `1px solid ${att.border}30`, cursor: "pointer", fontSize: 11, fontWeight: 700, color: att.color, gap: 4 }}>
-                        <span>{att.icon} {att.label}</span>
-                        <span style={{ fontSize: 10, color: "#bbb", fontWeight: 400 }}>tap</span>
-                      </button>
-
-                      {/* ── Points body (click to award) ── */}
-                      <div
-                        onClick={(e) => {
-                          if (s.attendance !== "present") return;
-                          if (selected === i) { setSelected(null); setPopoverPos(null); return; }
-                          const rect = e.currentTarget.parentElement.getBoundingClientRect();
-                          setPopoverPos({ top: rect.top + window.scrollY, left: rect.left, width: rect.width, height: rect.height });
-                          setSelected(i);
-                        }}
-                        data-card-body="true"
-                        style={{ padding: "12px 12px 8px", cursor: s.attendance === "present" ? "pointer" : "default" }}>
-                        {badge && <div style={{ position: "absolute", top: 34, right: 8, fontSize: 14 }}>{badge.icon}</div>}
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 6, paddingRight: 18 }}>{s.name}</div>
-                        <div style={{ fontSize: 30, fontWeight: 800, color: getPointColor(s.points), lineHeight: 1 }}>
-                          {s.points > 0 ? "+" : ""}{s.points}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>{s.attendance === "present" ? "tap to award" : "mark present to award"}</div>
-                      </div>
-
-                      {/* ── Footer ── */}
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px 8px", borderTop: "1px solid #EEE" }}>
-                        <button onClick={(e) => { e.stopPropagation(); setShowLog(showLog === i ? null : i); }}
-                          style={{ background: "none", border: "none", fontSize: 11, color: "#888", cursor: "pointer", padding: 0 }}>
-                          📋 {s.log.length}
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); removeStudent(i); }}
-                          style={{ background: "none", border: "none", fontSize: 11, color: "#ccc", cursor: "pointer", padding: 0 }}>
-                          ✕
-                        </button>
-                      </div>
-
-                      {showLog === i && s.log.length > 0 && (
-                        <div style={{ padding: "0 10px 8px", fontSize: 11, color: "#555" }}>
-                          {s.log.slice(0, 5).map((entry, ei) => (
-                            <div key={ei} style={{ padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                <span>{entry.emoji} {entry.label}</span>
-                                <span style={{ color: entry.pts > 0 ? "#2E7D5E" : "#C0392B", fontWeight: 700 }}>{entry.pts > 0 ? "+" : ""}{entry.pts}</span>
-                              </div>
-                              <div style={{ color: "#aaa", fontSize: 10, marginTop: 1 }}>{entry.date} · {entry.time}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Leaderboard view */}
-            {view === "leaderboard" && (
-              <div style={{ background: "white", borderRadius: 16, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}>
-                <div style={{ padding: "14px 20px", background: "#F8F9FC", borderBottom: "1px solid #E8EBF0", display: "grid", gridTemplateColumns: "40px 1fr 80px 130px 80px", gap: 12, fontSize: 11, fontWeight: 700, color: "#999", textTransform: "uppercase", letterSpacing: 1 }}>
-                  <div>#</div><div>Student</div><div style={{ textAlign: "center" }}>Events</div><div style={{ textAlign: "center" }}>Attendance</div><div style={{ textAlign: "right" }}>Points</div>
-                </div>
-                {sorted.map((s, rank) => {
-                  const badge = getBadge(s.points);
-                  const medal = rank === 0 ? "🥇" : rank === 1 ? "🥈" : rank === 2 ? "🥉" : null;
-                  const att = getAttendanceLabel(s.attendance);
-                  return (
-                    <div key={s.origIdx}
-                      style={{ display: "grid", gridTemplateColumns: "40px 1fr 80px 130px 80px", gap: 12, padding: "0 20px", borderBottom: "1px solid #F0F2F6", background: selected === s.origIdx ? "#E8F5F0" : rank < 3 ? "#FAFBFF" : "white", transition: "background 0.1s", alignItems: "center", opacity: s.attendance === "absent" ? 0.55 : 1 }}>
-                      <div style={{ fontSize: 15, textAlign: "center", padding: "14px 0" }}>{medal || <span style={{ color: "#ccc", fontSize: 13 }}>{rank + 1}</span>}</div>
-                      <div
-                        style={{ fontWeight: 600, fontSize: 14, cursor: s.attendance === "present" ? "pointer" : "default", padding: "14px 0" }}
-                        onClick={(e) => {
-                          if (s.attendance !== "present") return;
-                          if (selected === s.origIdx) { setSelected(null); setPopoverPos(null); return; }
-                          const rect = e.currentTarget.closest('[data-lb-row]') ? e.currentTarget.closest('[data-lb-row]').getBoundingClientRect() : e.currentTarget.getBoundingClientRect();
-                          setPopoverPos({ top: rect.top + window.scrollY, left: rect.left, width: rect.width, height: rect.height });
-                          setSelected(s.origIdx);
-                        }}>
-                        {s.name} {badge && <span style={{ fontSize: 13 }}>{badge.icon}</span>}
-                        <span style={{ display: "block", fontSize: 10, color: "#aaa", fontWeight: 400 }}>{s.attendance === "present" ? "tap to award pts" : "mark present to award"}</span>
-                      </div>
-                      <div style={{ textAlign: "center", fontSize: 13, color: "#888", padding: "14px 0" }}>{s.log.length}</div>
-                      {/* Attendance toggle in leaderboard */}
-                      <div style={{ textAlign: "center", padding: "10px 0" }}>
-                        <button
-                          onClick={() => toggleAttendance(s.origIdx)}
-                          style={{ background: att.bg, border: `1px solid ${att.border}`, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: att.color, cursor: "pointer", whiteSpace: "nowrap" }}>
-                          {att.icon} {att.label}
-                        </button>
-                      </div>
-                      <div style={{ textAlign: "right", fontWeight: 800, fontSize: 18, color: getPointColor(s.points), padding: "14px 0" }}>
-                        {s.points > 0 ? "+" : ""}{s.points}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Popover for awarding points */}
-            {selected !== null && popoverPos && ReactDOM.createPortal(
-              <div ref={popoverRef} style={{
-                position: "absolute",
-                top: (() => {
-                  const panelH = 200;
-                  const spaceBelow = document.documentElement.scrollHeight - (popoverPos.top + popoverPos.height);
-                  return spaceBelow > panelH
-                    ? popoverPos.top + popoverPos.height + 8
-                    : popoverPos.top - panelH - 8;
-                })(),
-                left: Math.min(Math.max(popoverPos.left, 12), window.innerWidth - 352),
-                width: Math.min(340, window.innerWidth - 24),
-                background: "white",
-                borderRadius: 14,
-                border: "2px solid #4C9B82",
-                padding: 16,
-                boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-                zIndex: 1000,
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>
-                    <span style={{ color: "#4C9B82" }}>🏅 Award points → {students[selected].name}</span>
-                  </div>
-                  <button onClick={() => { setSelected(null); setPopoverPos(null); }} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#aaa" }}>✕</button>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {CATEGORIES.map((cat) => (
-                    <button key={cat.id} onClick={(e) => { e.stopPropagation(); award(selected, cat); }}
-                      style={{ background: cat.color, color: "white", border: "none", borderRadius: 9, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
-                      {cat.emoji} {cat.label}
-                      <span style={{ background: "rgba(255,255,255,0.25)", borderRadius: 5, padding: "1px 6px", fontSize: 12 }}>
-                        {cat.points > 0 ? "+" : ""}{cat.points}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-                  <button onClick={() => { setSelected(null); setPopoverPos(null); }}
-                    style={{ background: "#4C9B82", color: "white", border: "none", borderRadius: 9, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                    Done
-                  </button>
-                </div>
-              </div>,
-              document.body
-            )}
-
-            {/* Stats footer */}
-            <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {CATEGORIES.map((cat) => {
-                const count = students.reduce((acc, s) => acc + s.log.filter((l) => l.label === cat.label).length, 0);
-                return (
-                  <div key={cat.id} style={{ background: "white", borderRadius: 10, padding: "10px 16px", border: `2px solid ${cat.color}20`, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>{cat.emoji}</span>
-                    <span style={{ color: "#555" }}>{cat.label}</span>
-                    <span style={{ fontWeight: 700, color: cat.color }}>{count}×</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Absent list — always visible */}
-            <div style={{ marginTop: 16, background: "white", borderRadius: 14, border: "2px solid #E05C5C40", padding: "14px 18px" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#E05C5C", marginBottom: 10 }}>
-                ❌ Absent / Unmarked ({students.filter(s => s.attendance !== "present").length})
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {students.filter(s => s.attendance !== "present").length === 0 ? (
-                  <div style={{ fontSize: 13, color: "#aaa" }}>✅ All students are marked present.</div>
-                ) : (
-                  students.filter(s => s.attendance !== "present").map((s, i) => (
-                    <button key={i}
-                      onClick={() => toggleAttendance(students.indexOf(s))}
-                      style={{ background: s.attendance === "absent" ? "#FFF1F1" : "#F5F5F5", border: `1px solid ${s.attendance === "absent" ? "#E05C5C40" : "#ddd"}`, borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", textAlign: "left" }}>
-                      <span style={{ fontWeight: 600, color: s.attendance === "absent" ? "#C0392B" : "#888" }}>{s.name}</span>
-                      <span style={{ color: "#aaa", fontSize: 10, marginLeft: 6 }}>{s.attendance === "absent" ? "absent" : "unmarked"} · tap to mark present</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-
           </div>
         </div>
-      );
-    }
+        <button
+          onClick={() => {
+            alert("clicked");
+          }}
+          style={{ background:"#4C9B82", color:"white", border:"none", borderRadius:8, padding:"9px 20px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+          🖨️ Print / Save PDF
+        </button>
+      </div>
 
-    // Wrap card divs need data-card attribute for popover positioning — patch onClick to use parentElement
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-  </script>
+        {/* Report Preview */}
+        <div ref={reportRef} style={{ padding:24 }}>
+          {/* Print header */}
+          <div className="print-only" style={{ textAlign:"center", marginBottom:24, paddingBottom:16, borderBottom:"2px solid #eee" }}>
+            <div style={{ fontSize:22, fontWeight:800, color:"#1A1A2E" }}>{className} — Participation Reports</div>
+            <div style={{ fontSize:14, color:"#888", marginTop:4 }}>{teacherName} · {dateLabel}</div>
+          </div>
+
+          {periodsToShow.map(period => {
+            const students = allPeriodData[period] || [];
+            const pc = PERIOD_COLORS[period];
+            const activeStudents = students.filter(s => s.log.length > 0 || s.attendance === "present");
+            
+            if (activeStudents.length === 0) {
+              return (
+                <div key={period} style={{ marginBottom:24, padding:20, border:"2px dashed #E0E4EC", borderRadius:12, textAlign:"center", color:"#aaa" }}>
+                  <div style={{ fontSize:16, fontWeight:700, color:"#999" }}>{period} — No data recorded yet</div>
+                  <div style={{ fontSize:13, marginTop:4 }}>Mark attendance and award points to generate reports.</div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={period} style={{ marginBottom:32 }}>
+                {/* Period header */}
+                <div style={{ background: pc.bg, border:`2px solid ${pc.accent}40`, borderRadius:12, padding:"12px 18px", marginBottom:16, display:"flex", alignItems:"center", gap:12 }}>
+                  <div style={{ background:pc.accent, color:"white", borderRadius:8, padding:"4px 14px", fontSize:15, fontWeight:800 }}>{period}</div>
+                  <div style={{ fontSize:14, fontWeight:700, color:pc.text }}>{className}</div>
+                  <div style={{ fontSize:13, color:pc.text, opacity:0.7 }}>·</div>
+                  <div style={{ fontSize:13, color:pc.text, opacity:0.7 }}>{teacherName}</div>
+                  <div style={{ marginLeft:"auto", fontSize:13, color:pc.text, opacity:0.8 }}>{dateLabel}</div>
+                </div>
+
+                {/* Student cards grid */}
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))", gap:12 }}>
+                  {students.map((s, i) => {
+                    const summary = getStudentSummary(s, period);
+                    const starMsg = getStarMessage(s);
+                    const att = getAttendanceMeta(s.attendance);
+                    return (
+                      <div key={i} className="report-card" style={{ background:"white", border:"1.5px solid #E8EBF0", borderRadius:12, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+                        {/* Card top strip */}
+                        <div style={{ background:pc.bg, padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                            <div style={{ width:36, height:36, borderRadius:"50%", background:pc.accent, color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700 }}>
+                              {s.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight:700, fontSize:14, color:pc.text }}>{s.name}</div>
+                              <div style={{ fontSize:11, color:pc.accent }}>{period} · {att.icon} {att.label}</div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign:"right" }}>
+                            <div style={{ fontSize:26, fontWeight:800, color:getPointColor(s.points), lineHeight:1 }}>
+                              {s.points > 0 ? "+" : ""}{s.points}
+                            </div>
+                            <div style={{ fontSize:10, color:"#aaa" }}>pts today</div>
+                          </div>
+                        </div>
+
+                        {/* Activity breakdown */}
+                        <div style={{ padding:"10px 14px" }}>
+                          {s.log.length === 0 ? (
+                            <div style={{ fontSize:12, color:"#bbb", textAlign:"center", padding:"8px 0" }}>No activity recorded</div>
+                          ) : (
+                            <>
+                              {/* Category bars */}
+                              <div style={{ marginBottom:8 }}>
+                                {CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
+                                  const count = s.log.filter(l => l.label === cat.label).length;
+                                  const catPtColor = cat.points > 0 ? "#2E7D5E" : "#C0392B";
+                                  return (
+                                    <div key={cat.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                                      <div style={{ width:16, height:16, borderRadius:4, background:cat.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, flexShrink:0 }}>
+                                        {cat.emoji}
+                                      </div>
+                                      <div style={{ fontSize:11, color:"#555", flex:1, minWidth:0 }} title={cat.label}>{cat.label}</div>
+                                      <div style={{ display:"flex", gap:2 }}>
+                                        {Array.from({length:Math.min(count,5)}).map((_,ci) => (
+                                          <div key={ci} style={{ width:10, height:10, borderRadius:2, background:cat.color, opacity:0.85 }} />
+                                        ))}
+                                        {count > 5 && <span style={{ fontSize:10, color:cat.color, fontWeight:700 }}>+{count-5}</span>}
+                                      </div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:catPtColor, minWidth:24, textAlign:"right" }}>
+                                        {cat.points > 0 ? "+" : ""}{cat.points * count}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Summary message */}
+                              {reportMode === "full" && (
+                                <div style={{ background:"#F8F9FC", borderRadius:8, padding:"8px 10px", fontSize:11, color:"#555", lineHeight:1.5, marginBottom:8 }}>
+                                  {starMsg}
+                                </div>
+                              )}
+
+                              {/* Full log (detail mode) */}
+                              {reportMode === "full" && s.log.length > 0 && (
+                                <div style={{ borderTop:"1px solid #F0F2F6", paddingTop:8 }}>
+                                  <div style={{ fontSize:10, fontWeight:700, color:"#aaa", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Activity Log</div>
+                                  {s.log.slice(0,8).map((entry, ei) => {
+                                      const entryColor = entry.pts > 0 ? "#2E7D5E" : "#C0392B";
+                                      const entryPts = entry.pts > 0 ? "+" + entry.pts : "" + entry.pts;
+                                      return (
+                                    <div key={ei} style={{ display:"flex", alignItems:"center", gap:6, padding:"2px 0", fontSize:11 }}>
+                                      <span>{entry.emoji}</span>
+                                      <span style={{ flex:1, color:"#555" }}>{entry.label}</span>
+                                      <span style={{ color:entryColor, fontWeight:700 }}>{entryPts}</span>
+                                      <span style={{ color:"#bbb", fontSize:10 }}>{entry.time}</span>
+                                    </div>
+                                      );
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {/* Teacher note */}
+                          {s.parentNote && (
+                            <div style={{ background:"#FFFBEA", border:"1px solid #FFD166", borderRadius:8, padding:"6px 10px", fontSize:11, color:"#7A5200", marginTop:8 }}>
+                              📝 <strong>Note:</strong> {s.parentNote}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Bottom strip */}
+                        <div style={{ background:"#F8F9FC", borderTop:"1px solid #F0F2F6", padding:"6px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                          <div style={{ fontSize:10, color:"#bbb" }}>{s.log.length} event{s.log.length !== 1 ? "s" : ""} logged</div>
+                          <button onClick={() => { const html = buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, className, dateLabel, { name: s.name, period }); if (html) { onPrint(html); onClose(); } }}
+                            style={{ background:"none", border:"1px solid #E0E4EC", borderRadius:6, padding:"3px 10px", fontSize:10, color:"#888", cursor:"pointer", fontWeight:600 }}>
+                            🖨️ Print this student
+                          </button>
+                          <div style={{ fontSize:10, color:"#bbb" }}>{className} · {period}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Period stats */}
+                <div style={{ marginTop:12, display:"flex", gap:10, flexWrap:"wrap" }}>
+                  {[
+                    { label:"Present", val: students.filter(s=>s.attendance==="present").length, color:"#4C9B82" },
+                    { label:"Absent",  val: students.filter(s=>s.attendance==="absent").length,  color:"#E05C5C" },
+                    { label:"Avg pts", val: students.length > 0 ? (students.reduce((a,s)=>a+s.points,0)/students.length).toFixed(1) : "0", color:pc.accent },
+                    { label:"Top scorer", val: students.sort((a,b)=>b.points-a.points)[0]?.name || "—", color:"#D4A017" },
+                  ].map((stat,i) => (
+                    <div key={i} style={{ background:"white", border:"1px solid #E8EBF0", borderRadius:8, padding:"6px 14px", display:"flex", gap:8, alignItems:"center", fontSize:13 }}>
+                      <span style={{ color:"#888" }}>{stat.label}:</span>
+                      <span style={{ fontWeight:700, color:stat.color }}>{stat.val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Print footer */}
+          <div className="print-only" style={{ marginTop:32, paddingTop:16, borderTop:"1px solid #eee", fontSize:11, color:"#aaa", textAlign:"center" }}>
+            Generated on {getTodayStr()} · {teacherName} · {className}
+          </div>
+        </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP ───────────────────────────────────────────────────────────────
+function App() {
+  const [activePeriod, setActivePeriod] = useState("P1");
+  const [allPeriodData, setAllPeriodData] = useState(() => {
+    const data = {};
+    PERIODS.forEach(p => { data[p] = loadPeriodData(p); });
+    return data;
+  });
+  const [history, setHistory] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [popoverPos, setPopoverPos] = useState(null);
+  const popoverRef = useRef(null);
+  const [newName, setNewName] = useState("");
+  const [view, setView] = useState("grid");
+  const [showLog, setShowLog] = useState(null);
+  const [flashAll, setFlashAll] = useState(null);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [undoToast, setUndoToast] = useState(null);
+  const [savedToast, setSavedToast] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [editNoteFor, setEditNoteFor] = useState(null);
+  const [noteText, setNoteText] = useState("");
+
+  const students = allPeriodData[activePeriod] || [];
+  const pc = PERIOD_COLORS[activePeriod];
+
+  const setStudents = useCallback((updater) => {
+    setAllPeriodData(prev => {
+      const current = prev[activePeriod];
+      const next = typeof updater === "function" ? updater(current) : updater;
+      const updated = { ...prev, [activePeriod]: next };
+      savePeriodData(activePeriod, next);
+      return updated;
+    });
+  }, [activePeriod]);
+
+  // Save all periods on change
+  useEffect(() => {
+    setSavedToast(true);
+    const t = setTimeout(() => setSavedToast(false), 1500);
+    return () => clearTimeout(t);
+  }, [allPeriodData]);
+
+  // Close popover on outside click
+  useEffect(() => {
+    const handle = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setSelected(null); setPopoverPos(null);
+      }
+    };
+    if (selected !== null) document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [selected]);
+
+  const snapshot = () => {
+    setHistory(h => [...h.slice(-19), { period: activePeriod, data: JSON.parse(JSON.stringify(allPeriodData)) }]);
+  };
+
+  const undo = () => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setHistory(h => h.slice(0, -1));
+    setAllPeriodData(prev.data);
+    PERIODS.forEach(p => savePeriodData(p, prev.data[p]));
+    setUndoToast(null);
+  };
+
+  const showUndoMsg = (label) => {
+    if (undoToast?.timeout) clearTimeout(undoToast.timeout);
+    const timeout = setTimeout(() => setUndoToast(null), 4000);
+    setUndoToast({ label, timeout });
+  };
+
+  const toggleAttendance = (idx) => {
+    setStudents(prev => prev.map((s, i) => {
+      if (i !== idx) return s;
+      const next = s.attendance === "present" ? "absent" : "present";
+      return { ...s, attendance: next };
+    }));
+  };
+
+  const award = (studentIdx, cat) => {
+    if (students[studentIdx].attendance !== "present") return;
+    snapshot();
+    const now = new Date();
+    setStudents(prev => prev.map((s, i) => {
+      if (i !== studentIdx) return s;
+      return {
+        ...s,
+        points: s.points + cat.points,
+        log: [{ label:cat.label, pts:cat.points, emoji:cat.emoji, time:getTimeStr(), date:getShortDateStr() }, ...s.log],
+      };
+    }));
+    showUndoMsg(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
+  };
+
+  const [giveAllHistory, setGiveAllHistory] = useState([]); // [{ id, cat, time, date }]
+
+  const awardAll = (cat) => {
+    snapshot();
+    const time = getTimeStr(); const date = getShortDateStr();
+    const batchId = Date.now().toString();
+    setStudents(prev => prev.map(s => {
+      if (s.attendance !== "present") return s;
+      return { ...s, points:s.points+cat.points, log:[{label:cat.label,pts:cat.points,emoji:cat.emoji,time,date,batchId},...s.log] };
+    }));
+    setGiveAllHistory(prev => [...prev, { id: batchId, cat, time }]);
+    showUndoMsg(`${cat.emoji} ${cat.label} → All present`);
+    setFlashAll(cat.id);
+    setTimeout(() => setFlashAll(null), 800);
+  };
+
+  const removeLogEntry = (studentIdx, logIdx) => {
+    snapshot();
+    setStudents(prev => prev.map((s, i) => {
+      if (i !== studentIdx) return s;
+      const entry = s.log[logIdx];
+      if (!entry) return s;
+      return { ...s, points: s.points - entry.pts, log: s.log.filter((_, li) => li !== logIdx) };
+    }));
+    showUndoMsg(`Removed entry from ${students[studentIdx].name}`);
+  };
+
+  const removeLogEntryByBatch = (studentIdx, batchId) => {
+    snapshot();
+    setStudents(prev => prev.map((s, i) => {
+      if (i !== studentIdx) return s;
+      const entry = s.log.find(l => l.batchId === batchId);
+      if (!entry) return s;
+      return { ...s, points: s.points - entry.pts, log: s.log.filter(l => l.batchId !== batchId || l !== entry) };
+    }));
+  };
+
+  const addStudent = () => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    snapshot();
+    setStudents(prev => [...prev, { name:trimmed, points:0, log:[], attendance:"absent", notes:"", parentNote:"" }]);
+    setNewName("");
+  };
+
+  const removeStudent = (idx) => {
+    snapshot();
+    setStudents(prev => prev.filter((_,i) => i !== idx));
+    if (selected === idx) setSelected(null);
+  };
+
+  const resetAll = () => {
+    snapshot();
+    setStudents(prev => prev.map(s => ({ ...s, points:0, log:[] })));
+    setSelected(null); setResetConfirm(false);
+    setGiveAllHistory([]);
+    showUndoMsg("Points reset");
+  };
+
+  const saveNote = () => {
+    if (editNoteFor === null) return;
+    setStudents(prev => prev.map((s,i) => i === editNoteFor ? { ...s, parentNote: noteText } : s));
+    setEditNoteFor(null); setNoteText("");
+  };
+
+  // Cross-period summary for header badges
+  const periodSummary = PERIODS.map(p => {
+    const d = allPeriodData[p] || [];
+    return { p, present: d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0) };
+  });
+
+  const sorted = [...students].map((s,i) => ({ ...s, origIdx:i })).sort((a,b) => b.points - a.points);
+
+  return (
+    <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }}>
+
+      {/* ── Top Header ── */}
+      <div className="no-print" style={{ background:"linear-gradient(135deg,#1A1A2E 0%,#16213E 100%)", color:"white", padding:"16px 20px 0" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:12 }}>
+          <div>
+            <div style={{ fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#7EC8A4", fontWeight:600 }}>Classroom Tool</div>
+            <h1 style={{ margin:0, fontSize:20, fontWeight:700, letterSpacing:-0.5 }}>Participation Tracker</h1>
+            <div style={{ fontSize:10, color: savedToast ? "#7EC8A4" : "rgba(255,255,255,0.25)", marginTop:2, transition:"color 0.3s" }}>
+              {savedToast ? "✓ All periods saved" : "Auto-saves per period"}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+            <div style={{ background:"rgba(255,255,255,0.08)", borderRadius:8, padding:"4px 6px", display:"flex", gap:4 }}>
+              {["grid","leaderboard"].map(v => (
+                <button key={v} onClick={() => setView(v)} style={{ background:view===v?"rgba(255,255,255,0.15)":"transparent", color:"white", border:"none", borderRadius:6, padding:"5px 12px", fontSize:12, cursor:"pointer", fontWeight:view===v?700:400 }}>
+                  {v === "grid" ? "🗂 Grid" : "🏆 Rank"}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowReport(true)}
+              style={{ background:"rgba(76,155,130,0.25)", color:"#7EC8A4", border:"1px solid rgba(76,155,130,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              📋 Reports
+            </button>
+            <button onClick={undo} disabled={history.length===0}
+              style={{ background:history.length>0?"rgba(255,209,102,0.2)":"rgba(255,255,255,0.05)", color:history.length>0?"#FFD166":"rgba(255,255,255,0.25)", border:`1px solid ${history.length>0?"#FFD166":"rgba(255,255,255,0.1)"}`, borderRadius:8, padding:"7px 14px", fontSize:13, cursor:history.length>0?"pointer":"default", fontWeight:600 }}>
+              ↩ Undo
+            </button>
+            {resetConfirm ? (
+              <div style={{ display:"flex", gap:6, alignItems:"center", background:"rgba(224,92,92,0.2)", border:"1px solid #E05C5C", borderRadius:8, padding:"4px 8px" }}>
+                <span style={{ fontSize:12, color:"#FFB3B3" }}>Reset?</span>
+                <button onClick={resetAll} style={{ background:"#E05C5C", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>Yes</button>
+                <button onClick={() => setResetConfirm(false)} style={{ background:"rgba(255,255,255,0.1)", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer" }}>No</button>
+              </div>
+            ) : (
+              <button onClick={() => setResetConfirm(true)} style={{ background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.7)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer" }}>
+                ↺ Reset
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Period Tabs ── */}
+        <div style={{ display:"flex", gap:4, overflowX:"auto" }}>
+          {PERIODS.map(p => {
+            const ps = periodSummary.find(x => x.p === p);
+            const ppc = PERIOD_COLORS[p];
+            const isActive = p === activePeriod;
+            return (
+              <button key={p} onClick={() => { setActivePeriod(p); setSelected(null); setPopoverPos(null); setGiveAllHistory([]); }}
+                style={{ background: isActive ? "white" : "rgba(255,255,255,0.07)", color: isActive ? ppc.text : "rgba(255,255,255,0.6)", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 16px", fontSize:13, cursor:"pointer", fontWeight:isActive?700:500, position:"relative", transition:"all 0.15s", flexShrink:0, minWidth:80 }}>
+                <div style={{ fontWeight:800, fontSize:14 }}>{p}</div>
+                <div style={{ fontSize:10, color: isActive ? ppc.accent : "rgba(255,255,255,0.4)", marginTop:1 }}>
+                  {ps?.present}/{ps?.total} · {ps?.pts > 0 ? "+" : ""}{ps?.pts}pts
+                </div>
+                {isActive && <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)", width:24, height:3, background:ppc.accent, borderRadius:"2px 2px 0 0" }} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Give All / Legend strip ── */}
+      <div className="no-print" style={{ background:"white", borderBottom:"1px solid #E8EBF0", padding:"10px 20px", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+        <div style={{ fontSize:12, fontWeight:700, color:"#555", whiteSpace:"nowrap" }}>👥 Give all:</div>
+        {CATEGORIES.filter(c => ["entrance","turntalk","offtask"].includes(c.id)).map(cat => (
+          <button key={cat.id} onClick={() => awardAll(cat)}
+            style={{ background:flashAll===cat.id?cat.color:`${cat.color}18`, color:flashAll===cat.id?"white":cat.color, border:`1.5px solid ${cat.color}`, borderRadius:8, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", transition:"all 0.15s" }}>
+            {cat.emoji} {cat.label} <span style={{ opacity:0.7 }}>({cat.points>0?"+":""}{cat.points} all)</span>
+          </button>
+        ))}
+        <div style={{ marginLeft:"auto", display:"flex", gap:8, flexWrap:"wrap" }}>
+          {CATEGORIES.map(c => (
+            <div key={c.id} style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:"#888" }}>
+              <div style={{ width:7, height:7, borderRadius:"50%", background:c.color }} />
+              {c.emoji} <span style={{ color:c.points>0?"#2E7D5E":"#C0392B", fontWeight:700 }}>{c.points>0?"+":""}{c.points}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding:"16px 20px", maxWidth:1100, margin:"0 auto" }}>
+
+        {/* ── Give All Quick-Undo Panel ── */}
+        {giveAllHistory.length > 0 && (
+          <div className="no-print" style={{ marginBottom:14 }}>
+            {[...giveAllHistory].reverse().map(batch => {
+              const remainingCount = students.filter(s => s.log.some(l => l.batchId === batch.id)).length;
+              if (remainingCount === 0) return null;
+              return (
+                <div key={batch.id} style={{ background:"#FFFBEA", border:"1.5px solid #FFD166", borderRadius:12, padding:"10px 14px", marginBottom:8 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:13 }}>{batch.cat.emoji}</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#7A5200" }}>Give All — <em style={{ fontStyle:"normal" }}>{batch.cat.label}</em></span>
+                    <span style={{ fontSize:11, color:"#bbb" }}>{batch.time}</span>
+                    <span style={{ fontSize:11, color:"#aaa", background:"#FFF3CD", borderRadius:5, padding:"1px 8px", border:"1px solid #FFD166" }}>{remainingCount} remaining</span>
+                    <button onClick={() => setGiveAllHistory(prev => prev.filter(b => b.id !== batch.id))}
+                      style={{ marginLeft:"auto", background:"none", border:"none", color:"#ccc", fontSize:13, cursor:"pointer", lineHeight:1 }}>✕</button>
+                  </div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {students.map((s, i) => {
+                      const hasEntry = s.log.some(l => l.batchId === batch.id);
+                      const isAbsent = s.attendance !== "present";
+                      if (isAbsent) return null;
+                      return (
+                        <button key={i}
+                          onClick={() => { if (hasEntry) removeLogEntryByBatch(i, batch.id); }}
+                          disabled={!hasEntry}
+                          style={{
+                            background: hasEntry ? "#FFF1F1" : "#F8FCF9",
+                            border: `1.5px solid ${hasEntry ? "#E05C5C70" : "#B8DDD0"}`,
+                            borderRadius:8, padding:"5px 12px", fontSize:12,
+                            cursor: hasEntry ? "pointer" : "default",
+                            color: hasEntry ? "#C0392B" : "#7EC8A4",
+                            fontWeight:700,
+                            display:"flex", alignItems:"center", gap:5,
+                            transition:"all 0.15s",
+                          }}>
+                          <span style={{ fontSize:13 }}>{hasEntry ? "↩" : "✓"}</span>
+                          {s.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Attendance + Add row */}
+        <div className="no-print" style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
+          <div style={{ background:"white", borderRadius:12, border:"1px solid #E8EBF0", padding:"10px 16px", display:"flex", alignItems:"center", gap:12, flexShrink:0, flex:1 }}>
+            <span style={{ fontSize:12, fontWeight:700, color:"#555" }}>📋 {activePeriod} Attendance</span>
+            <span style={{ color:"#4C9B82", fontWeight:700, fontSize:13 }}>✅ {students.filter(s=>s.attendance==="present").length}</span>
+            <span style={{ color:"#E05C5C", fontWeight:700, fontSize:13 }}>❌ {students.filter(s=>s.attendance!=="present").length}</span>
+            <button onClick={() => { snapshot(); setStudents(prev => prev.map(s => ({ ...s, attendance:"present" }))); showUndoMsg("All present"); }}
+              style={{ background:`${pc.accent}18`, color:pc.accent, border:`1px solid ${pc.accent}`, borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              ✅ All Present
+            </button>
+            <button onClick={() => { snapshot(); setStudents(prev => prev.map(s => ({ ...s, attendance:"absent" }))); }}
+              style={{ background:"#FFF1F1", color:"#E05C5C", border:"1px solid #E05C5C60", borderRadius:8, padding:"4px 12px", fontSize:12, cursor:"pointer" }}>
+              Clear
+            </button>
+          </div>
+          <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+            <input value={newName} onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => e.key==="Enter" && addStudent()}
+              placeholder="Add student…"
+              style={{ padding:"9px 14px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:13, width:160, outline:"none" }} />
+            <button onClick={addStudent} style={{ background:pc.accent, color:"white", border:"none", borderRadius:10, padding:"9px 16px", fontSize:13, fontWeight:700, cursor:"pointer" }}>+ Add</button>
+          </div>
+        </div>
+
+        {/* ── Grid View ── */}
+        {view === "grid" && (
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(155px, 1fr))", gap:10 }}>
+            {students.map((s, i) => {
+              const badge = getBadge(s.points);
+              const att = getAttendanceMeta(s.attendance);
+              const flashCat = CATEGORIES.find(c => c.id === flashAll);
+              return (
+                <div key={i} style={{ background:flashAll?`${flashCat?.color}18`:getCardBg(s.points), border:`2px solid ${flashAll?flashCat?.color:selected===i?pc.accent:"#E8EBF0"}`, borderRadius:12, overflow:"hidden", transition:"all 0.15s", opacity:s.attendance==="absent"?0.65:1, position:"relative" }}>
+                  {/* Attendance strip */}
+                  <button onClick={e => { e.stopPropagation(); toggleAttendance(i); }}
+                    style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"5px 10px", background:att.bg, border:"none", borderBottom:`1px solid ${att.border}30`, cursor:"pointer", fontSize:10, fontWeight:700, color:att.color }}>
+                    <span>{att.icon} {att.label}</span>
+                    <span style={{ fontSize:9, color:"#ccc" }}>tap</span>
+                  </button>
+                  {/* Body */}
+                  <div onClick={e => {
+                    if (s.attendance !== "present") return;
+                    if (selected === i) { setSelected(null); setPopoverPos(null); return; }
+                    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+                    setPopoverPos({ top:rect.top+window.scrollY, left:rect.left, width:rect.width, height:rect.height });
+                    setSelected(i);
+                  }} style={{ padding:"10px 12px 6px", cursor:s.attendance==="present"?"pointer":"default" }}>
+                    {badge && <div style={{ position:"absolute", top:32, right:8, fontSize:13 }}>{badge}</div>}
+                    <div style={{ fontSize:12, fontWeight:600, color:"#333", marginBottom:4, paddingRight:16 }}>{s.name}</div>
+                    <div style={{ fontSize:28, fontWeight:800, color:getPointColor(s.points), lineHeight:1 }}>
+                      {s.points>0?"+":""}{s.points}
+                    </div>
+                    <div style={{ fontSize:9, color:"#aaa", marginTop:2 }}>{s.attendance==="present"?"tap to award":"mark present first"}</div>
+                    {s.parentNote && <div style={{ fontSize:9, color:"#D4A017", marginTop:3 }}>📝 has note</div>}
+                  </div>
+                  {/* Footer */}
+                  <div style={{ display:"flex", justifyContent:"space-between", padding:"4px 10px 6px", borderTop:"1px solid #EEE" }}>
+                    <button onClick={e => { e.stopPropagation(); setShowLog(showLog===i?null:i); }}
+                      style={{ background:"none", border:"none", fontSize:10, color:"#888", cursor:"pointer", padding:0 }}>
+                      📋 {s.log.length}
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); setEditNoteFor(i); setNoteText(s.parentNote||""); }}
+                      style={{ background:"none", border:"none", fontSize:10, color:"#D4A017", cursor:"pointer", padding:0 }} title="Add parent note">
+                      ✏️
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); removeStudent(i); }}
+                      style={{ background:"none", border:"none", fontSize:10, color:"#ddd", cursor:"pointer", padding:0 }}>✕</button>
+                  </div>
+                  {showLog === i && s.log.length > 0 && (
+                    <div style={{ padding:"0 10px 8px", fontSize:11, color:"#555" }}>
+                      <div style={{ fontSize:9, color:"#bbb", textTransform:"uppercase", letterSpacing:1, padding:"4px 0 2px", fontWeight:700 }}>Tap ↩ to remove an entry</div>
+                      {s.log.slice(0,6).map((entry,ei) => {
+                        const eColor = entry.pts > 0 ? "#2E7D5E" : "#C0392B";
+                        const ePts = (entry.pts > 0 ? "+" : "") + entry.pts;
+                        return (
+                        <div key={ei} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 0", borderBottom:"1px solid #f0f0f0" }}>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ display:"flex", justifyContent:"space-between" }}>
+                              <span style={{ fontSize:11 }}>{entry.emoji} {entry.label}</span>
+                              <span style={{ color:eColor, fontWeight:700 }}>{ePts}</span>
+                            </div>
+                            <div style={{ color:"#bbb", fontSize:9 }}>{entry.date} · {entry.time}</div>
+                          </div>
+                          <button
+                            onClick={e => { e.stopPropagation(); removeLogEntry(i, ei); }}
+                            title="Remove this entry"
+                            style={{ background:"#FFF1F1", border:"1px solid #E05C5C60", borderRadius:5, color:"#E05C5C", fontSize:10, fontWeight:700, padding:"2px 6px", cursor:"pointer", flexShrink:0, lineHeight:1.4 }}>
+                            ↩
+                          </button>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Leaderboard View ── */}
+        {view === "leaderboard" && (
+          <div style={{ background:"white", borderRadius:14, overflow:"hidden", boxShadow:"0 4px 20px rgba(0,0,0,0.07)" }}>
+            <div style={{ padding:"12px 20px", background:"#F8F9FC", borderBottom:"1px solid #E8EBF0", display:"grid", gridTemplateColumns:"36px 1fr 70px 120px 70px", gap:10, fontSize:10, fontWeight:700, color:"#999", textTransform:"uppercase", letterSpacing:1 }}>
+              <div>#</div><div>Student</div><div style={{ textAlign:"center" }}>Events</div><div style={{ textAlign:"center" }}>Attendance</div><div style={{ textAlign:"right" }}>Points</div>
+            </div>
+            {sorted.map((s, rank) => {
+              const medal = rank===0?"🥇":rank===1?"🥈":rank===2?"🥉":null;
+              const att = getAttendanceMeta(s.attendance);
+              return (
+                <div key={s.origIdx} style={{ display:"grid", gridTemplateColumns:"36px 1fr 70px 120px 70px", gap:10, padding:"0 20px", borderBottom:"1px solid #F0F2F6", background:rank<3?"#FAFBFF":"white", alignItems:"center", opacity:s.attendance==="absent"?0.55:1 }}>
+                  <div style={{ fontSize:14, textAlign:"center", padding:"12px 0" }}>{medal||<span style={{ color:"#ccc", fontSize:12 }}>{rank+1}</span>}</div>
+                  <div style={{ fontWeight:600, fontSize:13, cursor:s.attendance==="present"?"pointer":"default", padding:"12px 0" }}
+                    onClick={e => {
+                      if (s.attendance !== "present") return;
+                      if (selected===s.origIdx) { setSelected(null); setPopoverPos(null); return; }
+                      const rect = e.currentTarget.closest("div[style]").getBoundingClientRect();
+                      setPopoverPos({ top:rect.top+window.scrollY, left:rect.left, width:rect.width, height:rect.height });
+                      setSelected(s.origIdx);
+                    }}>
+                    {s.name} {getBadge(s.points) && <span style={{ fontSize:12 }}>{getBadge(s.points)}</span>}
+                    <span style={{ display:"block", fontSize:9, color:"#aaa", fontWeight:400 }}>{s.attendance==="present"?"tap to award":"mark present first"}</span>
+                  </div>
+                  <div style={{ textAlign:"center", fontSize:12, color:"#888", padding:"12px 0" }}>{s.log.length}</div>
+                  <div style={{ textAlign:"center", padding:"8px 0" }}>
+                    <button onClick={() => toggleAttendance(s.origIdx)}
+                      style={{ background:att.bg, border:`1px solid ${att.border}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:att.color, cursor:"pointer" }}>
+                      {att.icon} {att.label}
+                    </button>
+                  </div>
+                  <div style={{ textAlign:"right", fontWeight:800, fontSize:17, color:getPointColor(s.points), padding:"12px 0" }}>
+                    {s.points>0?"+":""}{s.points}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Activity summary footer */}
+        <div style={{ marginTop:16, display:"flex", gap:10, flexWrap:"wrap" }}>
+          {CATEGORIES.map(cat => {
+            const count = students.reduce((acc,s) => acc + s.log.filter(l=>l.label===cat.label).length, 0);
+            return (
+              <div key={cat.id} style={{ background:"white", borderRadius:10, padding:"8px 14px", border:`1.5px solid ${cat.color}20`, fontSize:12, display:"flex", alignItems:"center", gap:6 }}>
+                <span>{cat.emoji}</span>
+                <span style={{ color:"#555" }}>{cat.label}</span>
+                <span style={{ fontWeight:700, color:cat.color }}>{count}×</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Absent list */}
+        <div className="no-print" style={{ marginTop:14, background:"white", borderRadius:12, border:"1.5px solid #E05C5C30", padding:"12px 16px" }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#E05C5C", marginBottom:8 }}>
+            ❌ Absent / Unmarked — {activePeriod} ({students.filter(s=>s.attendance!=="present").length})
+          </div>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {students.filter(s=>s.attendance!=="present").length===0 ? (
+              <div style={{ fontSize:12, color:"#aaa" }}>✅ All marked present</div>
+            ) : (
+              students.map((s,origI) => s.attendance!=="present" ? (
+                <button key={origI} onClick={() => toggleAttendance(origI)}
+                  style={{ background:"#FFF1F1", border:"1px solid #E05C5C40", borderRadius:8, padding:"5px 12px", fontSize:12, cursor:"pointer" }}>
+                  <span style={{ fontWeight:600, color:"#C0392B" }}>{s.name}</span>
+                  <span style={{ color:"#aaa", fontSize:10, marginLeft:6 }}>tap → present</span>
+                </button>
+              ) : null)
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Award Popover ── */}
+      {selected !== null && popoverPos && ReactDOM.createPortal(
+        <div ref={popoverRef} style={{
+          position:"absolute",
+          top:(() => {
+            const panelH = 210;
+            const spaceBelow = document.documentElement.scrollHeight - (popoverPos.top + popoverPos.height);
+            return spaceBelow > panelH ? popoverPos.top + popoverPos.height + 8 : popoverPos.top - panelH - 8;
+          })(),
+          left: Math.min(Math.max(popoverPos.left, 12), window.innerWidth - 352),
+          width: Math.min(340, window.innerWidth - 24),
+          background:"white",
+          borderRadius:14,
+          border:`2px solid ${pc.accent}`,
+          padding:16,
+          boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
+          zIndex:1000,
+        }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:pc.accent }}>
+              🏅 Award → {students[selected]?.name}
+              <span style={{ background:pc.bg, color:pc.text, fontSize:10, borderRadius:5, padding:"2px 8px", marginLeft:8 }}>{activePeriod}</span>
+            </div>
+            <button onClick={() => { setSelected(null); setPopoverPos(null); }} style={{ background:"none", border:"none", fontSize:17, cursor:"pointer", color:"#aaa" }}>✕</button>
+          </div>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {CATEGORIES.map(cat => (
+              <button key={cat.id} onClick={e => { e.stopPropagation(); award(selected, cat); }}
+                style={{ background:cat.color, color:"white", border:"none", borderRadius:9, padding:"8px 13px", fontSize:12, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:5, boxShadow:"0 2px 8px rgba(0,0,0,0.12)" }}>
+                {cat.emoji} {cat.label}
+                <span style={{ background:"rgba(255,255,255,0.25)", borderRadius:5, padding:"1px 6px", fontSize:11 }}>{cat.points>0?"+":""}{cat.points}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop:12, display:"flex", justifyContent:"flex-end" }}>
+            <button onClick={() => { setSelected(null); setPopoverPos(null); }}
+              style={{ background:pc.accent, color:"white", border:"none", borderRadius:9, padding:"7px 20px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              Done
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Undo Toast ── */}
+      {undoToast && (
+        <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#1A1A2E", color:"white", borderRadius:12, padding:"10px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 6px 24px rgba(0,0,0,0.3)", zIndex:999, fontSize:13, border:"1px solid rgba(255,255,255,0.1)", whiteSpace:"nowrap" }}>
+          <span style={{ color:"#aaa" }}>Awarded: <strong style={{ color:"white" }}>{undoToast.label}</strong></span>
+          <button onClick={undo} style={{ background:"#FFD166", color:"#1A1A2E", border:"none", borderRadius:8, padding:"5px 12px", fontWeight:700, fontSize:12, cursor:"pointer" }}>↩ Undo</button>
+          <button onClick={() => setUndoToast(null)} style={{ background:"none", border:"none", color:"#666", fontSize:15, cursor:"pointer" }}>✕</button>
+        </div>
+      )}
+
+      {/* ── Parent Note Modal ── */}
+      {editNoteFor !== null && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+          <div style={{ background:"white", borderRadius:16, padding:24, maxWidth:400, width:"100%", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <h3 style={{ margin:"0 0 6px", fontSize:16 }}>📝 Parent Note</h3>
+            <div style={{ fontSize:13, color:"#888", marginBottom:14 }}>
+              For <strong>{students[editNoteFor]?.name}</strong> · Appears on printed report
+            </div>
+            <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
+              placeholder="e.g. 'Called home 6/12. Parent aware of missing work.'"
+              rows={4}
+              style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:14, resize:"vertical", outline:"none" }} />
+            <div style={{ display:"flex", gap:8, marginTop:14, justifyContent:"flex-end" }}>
+              <button onClick={() => { setEditNoteFor(null); setNoteText(""); }}
+                style={{ background:"none", border:"2px solid #E0E4EC", borderRadius:9, padding:"8px 18px", fontSize:13, cursor:"pointer" }}>Cancel</button>
+              <button onClick={saveNote}
+                style={{ background:"#4C9B82", color:"white", border:"none", borderRadius:9, padding:"8px 20px", fontSize:13, fontWeight:700, cursor:"pointer" }}>Save Note</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reports Page (full page swap) ── */}
+      {showReport && (
+        <ParentReportModal allPeriodData={allPeriodData} onClose={() => setShowReport(false)} onPrint={(html) => { window.triggerPrint(html); }} />
+      )}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+<script>
+// Plain JS - no Babel - handles printing
+window.triggerPrint = function(html) {
+  alert("triggerPrint called, length=" + html.length);
+  var div = document.createElement("div");
+  div.id = "pt-print-root";
+  div.style.cssText = "font-family:Segoe UI,sans-serif;padding:24px;color:#1A1A2E;background:white";
+  div.innerHTML = html;
+  document.body.appendChild(div);
+  var style = document.createElement("style");
+  style.textContent = "@media print{body *{display:none!important}#pt-print-root,#pt-print-root *{display:revert!important}@page{margin:1.5cm}}";
+  document.head.appendChild(style);
+  window.print();
+  document.body.removeChild(div);
+  document.head.removeChild(style);
+};
+</script>
 </body>
 </html>
