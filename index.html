@@ -485,7 +485,7 @@
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {CATEGORIES.map((cat) => (
-                    <button key={cat.id} onClick={(e) => { e.stopPropagation(); award(selected, cat); setSelected(null); setPopoverPos(null); }}
+                    <button key={cat.id} onClick={(e) => { e.stopPropagation(); award(selected, cat); }}
                       style={{ background: cat.color, color: "white", border: "none", borderRadius: 9, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
                       {cat.emoji} {cat.label}
                       <span style={{ background: "rgba(255,255,255,0.25)", borderRadius: 5, padding: "1px 6px", fontSize: 12 }}>
@@ -493,6 +493,12 @@
                       </span>
                     </button>
                   ))}
+                </div>
+                <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                  <button onClick={() => { setSelected(null); setPopoverPos(null); }}
+                    style={{ background: "#4C9B82", color: "white", border: "none", borderRadius: 9, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                    Done
+                  </button>
                 </div>
               </div>,
               document.body
