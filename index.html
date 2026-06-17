@@ -37,6 +37,7 @@
     const STORAGE_KEY = "participation_tracker_students";
 
     const POINTS_KEY = "participation_tracker_points";
+    const EXPORT_KEY = "participation_tracker_export";
 
     const loadStudents = () => {
       const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
@@ -67,6 +68,34 @@
       const [resetConfirm, setResetConfirm] = useState(false);
       const [undoToast, setUndoToast] = useState(null);
       const [savedToast, setSavedToast] = useState(false);
+
+      // Auto-export previous session data on page load (only confirmed, non-undone actions)
+      useEffect(() => {
+        try {
+          const saved = localStorage.getItem(EXPORT_KEY);
+          if (saved) {
+            const prev = JSON.parse(saved);
+            const hasData = prev.some(s => s.points !== 0 || (s.log && s.log.length > 0));
+            if (hasData) {
+              const rows = [["Date", "Student", "Attendance", "Total Points", "Activity", "Points", "Time"]];
+              const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+              prev.forEach(s => {
+                if (!s.log || s.log.length === 0) {
+                  rows.push([today, s.name, s.attendance || "—", s.points, "—", "—", "—"]);
+                } else {
+                  s.log.forEach((entry, i) => {
+                    rows.push([entry.date || today, s.name, i === 0 ? (s.attendance || "—") : "", i === 0 ? s.points : "", entry.label, entry.pts, entry.time]);
+                  });
+                }
+              });
+              const url = SHEETS_URL + "?data=" + encodeURIComponent(JSON.stringify(rows));
+              fetch(url, { mode: "no-cors" }).catch(() => {});
+              localStorage.removeItem(EXPORT_KEY);
+              setExportToast({ ok: true, msg: "Previous session auto-exported ✓" });
+            }
+          }
+        } catch(e) {}
+      }, []);
 
       useEffect(() => {
         const handleClickOutside = (e) => {
@@ -105,6 +134,10 @@
         setHistory((h) => [...h.slice(-19), current]);
       };
 
+      const saveExport = (studentList) => {
+        try { localStorage.setItem(EXPORT_KEY, JSON.stringify(studentList)); } catch(e) {}
+      };
+
       const showUndoToast = (label) => {
         if (undoToast && undoToast.timeout) clearTimeout(undoToast.timeout);
         const timeout = setTimeout(() => setUndoToast(null), 4000);
@@ -123,19 +156,19 @@
         if (students[studentIdx].attendance !== "present") return;
         snapshot(students);
         const now = new Date();
-        setStudents((prev) =>
-          prev.map((s, i) => {
-            if (i !== studentIdx) return s;
-            return {
-              ...s,
-              points: s.points + cat.points,
-              log: [
-                { label: cat.label, pts: cat.points, emoji: cat.emoji, time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), date: now.toLocaleDateString([], { month: "short", day: "numeric" }) },
-                ...s.log,
-              ],
-            };
-          })
-        );
+        const next = students.map((s, i) => {
+          if (i !== studentIdx) return s;
+          return {
+            ...s,
+            points: s.points + cat.points,
+            log: [
+              { label: cat.label, pts: cat.points, emoji: cat.emoji, time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), date: now.toLocaleDateString([], { month: "short", day: "numeric" }) },
+              ...s.log,
+            ],
+          };
+        });
+        setStudents(next);
+        saveExport(next);
         showUndoToast(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
       };
 
@@ -144,16 +177,16 @@
         const now = new Date();
         const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         const date = now.toLocaleDateString([], { month: "short", day: "numeric" });
-        setStudents((prev) =>
-          prev.map((s) => {
-            if (s.attendance !== "present") return s;
-            return {
-              ...s,
-              points: s.points + cat.points,
-              log: [{ label: cat.label, pts: cat.points, emoji: cat.emoji, time, date }, ...s.log],
-            };
-          })
-        );
+        const next = students.map((s) => {
+          if (s.attendance !== "present") return s;
+          return {
+            ...s,
+            points: s.points + cat.points,
+            log: [{ label: cat.label, pts: cat.points, emoji: cat.emoji, time, date }, ...s.log],
+          };
+        });
+        setStudents(next);
+        saveExport(next);
         showUndoToast(`${cat.emoji} ${cat.label} → All students`);
         setFlashAll(cat.id);
         setTimeout(() => setFlashAll(null), 800);
@@ -188,11 +221,10 @@
 
       const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxzaCI3zKNKDJtrMbiKP3l8v5NVOa77_RfrByVTeVRlOe6yFyilHPCr4BqL3PaLcenSYA/exec";
 
-      const exportToSheets = () => {
+      const buildExportRows = (studentList) => {
         const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-        const rows = [];
-        rows.push(["Date", "Student", "Attendance", "Total Points", "Activity", "Points", "Time"]);
-        students.forEach(s => {
+        const rows = [["Date", "Student", "Attendance", "Total Points", "Activity", "Points", "Time"]];
+        studentList.forEach(s => {
           if (s.log.length === 0) {
             rows.push([today, s.name, s.attendance || "—", s.points, "—", "—", "—"]);
           } else {
@@ -209,9 +241,20 @@
             });
           }
         });
+        return rows;
+      };
+
+      const exportToSheets = (studentList, silent = false) => {
+        const rows = buildExportRows(studentList || students);
         const url = SHEETS_URL + "?data=" + encodeURIComponent(JSON.stringify(rows));
-        window.open(url, "_blank");
-        setExportToast({ ok: true, msg: "Exported to Google Sheets ✓" });
+        if (silent) {
+          fetch(url, { mode: "no-cors" })
+            .then(() => setExportToast({ ok: true, msg: "Auto-exported to Google Sheets ✓" }))
+            .catch(() => {});
+        } else {
+          window.open(url, "_blank");
+          setExportToast({ ok: true, msg: "Exported to Google Sheets ✓" });
+        }
       };
 
       const sorted = [...students].map((s, i) => ({ ...s, origIdx: i })).sort((a, b) => b.points - a.points);
