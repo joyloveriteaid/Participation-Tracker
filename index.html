@@ -80,7 +80,6 @@
           })
         );
         showUndoToast(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
-        setSelected(null);
       };
 
       const awardAll = (cat) => {
@@ -137,7 +136,6 @@
       return (
         <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", minHeight: "100vh", background: "#F5F7FA", color: "#1A1A2E" }}>
 
-          {/* Header */}
           <div style={{ background: "linear-gradient(135deg, #1A1A2E 0%, #16213E 100%)", color: "white", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#7EC8A4", fontWeight: 600, marginBottom: 2 }}>Classroom Tool</div>
@@ -169,7 +167,6 @@
             </div>
           </div>
 
-          {/* Legend */}
           <div style={{ background: "#1A1A2E", padding: "10px 24px 14px", display: "flex", gap: 12, flexWrap: "wrap" }}>
             {CATEGORIES.map((c) => (
               <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
@@ -179,7 +176,6 @@
             ))}
           </div>
 
-          {/* Undo toast */}
           {undoToast && (
             <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1A1A2E", color: "white", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", zIndex: 999, fontSize: 14, border: "1px solid rgba(255,255,255,0.1)", whiteSpace: "nowrap" }}>
               <span style={{ color: "#aaa" }}>Awarded: <strong style={{ color: "white" }}>{undoToast.label}</strong></span>
@@ -190,7 +186,6 @@
 
           <div style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
 
-            {/* Add student */}
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input value={newName} onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addStudent()}
@@ -201,7 +196,6 @@
               </button>
             </div>
 
-            {/* Give All panel */}
             <div style={{ background: "white", borderRadius: 14, border: "2px solid #E8EBF0", padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#555", whiteSpace: "nowrap" }}>👥 Give All:</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -217,7 +211,6 @@
               </div>
             </div>
 
-            {/* Selected student panel */}
             {selected !== null && (
               <div style={{ background: "white", borderRadius: 14, border: "2px solid #4C9B82", padding: 18, marginBottom: 16, boxShadow: "0 4px 20px rgba(76,155,130,0.15)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -240,7 +233,6 @@
               </div>
             )}
 
-            {/* Grid view */}
             {view === "grid" && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
                 {students.map((s, i) => {
@@ -284,7 +276,6 @@
               </div>
             )}
 
-            {/* Leaderboard view */}
             {view === "leaderboard" && (
               <div style={{ background: "white", borderRadius: 16, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}>
                 <div style={{ padding: "14px 20px", background: "#F8F9FC", borderBottom: "1px solid #E8EBF0", display: "grid", gridTemplateColumns: "40px 1fr 80px 80px", gap: 12, fontSize: 11, fontWeight: 700, color: "#999", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -308,7 +299,6 @@
               </div>
             )}
 
-            {/* Summary bar */}
             <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap" }}>
               {CATEGORIES.map((cat) => {
                 const count = students.reduce((acc, s) => acc + s.log.filter((l) => l.label === cat.label).length, 0);
