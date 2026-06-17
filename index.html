@@ -227,14 +227,15 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   };
 
   return (
-    <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:2000, overflowY:"auto", background:"rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }} onClick={e => e.stopPropagation()}>
       {/* Report Header */}
       <div style={{ background:"linear-gradient(135deg,#1A1A2E 0%,#16213E 100%)", color:"white", padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
         <div>
           <div style={{ fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#7EC8A4", fontWeight:600 }}>Reports</div>
           <h2 style={{ margin:0, fontSize:20, fontWeight:700 }}>Parent Communication Reports</h2>
         </div>
-        <button onClick={onClose} style={{ background:"rgba(255,255,255,0.15)", color:"white", border:"1px solid rgba(255,255,255,0.3)", borderRadius:8, padding:"8px 18px", cursor:"pointer", fontSize:14, fontWeight:600 }}>← Back to Tracker</button>
+        <button onClick={onClose} style={{ background:"rgba(255,255,255,0.15)", color:"white", border:"1px solid rgba(255,255,255,0.3)", borderRadius:8, padding:"8px 18px", cursor:"pointer", fontSize:14, fontWeight:600 }}>✕ Close</button>
       </div>
 
       {/* Controls */}
@@ -275,7 +276,8 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
         </div>
         <button
           onClick={() => {
-            alert("clicked");
+            const html = buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, className, dateLabel, null);
+            onPrint(html);
           }}
           style={{ background:"#4C9B82", color:"white", border:"none", borderRadius:8, padding:"9px 20px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
           🖨️ Print / Save PDF
@@ -446,6 +448,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
             Generated on {getTodayStr()} · {teacherName} · {className}
           </div>
         </div>
+      </div>
     </div>
   );
 }
@@ -1014,10 +1017,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 <script>
 // Plain JS - no Babel - handles printing
 window.triggerPrint = function(html) {
-  alert("triggerPrint called, length=" + html.length);
   var div = document.createElement("div");
   div.id = "pt-print-root";
-  div.style.cssText = "font-family:Segoe UI,sans-serif;padding:24px;color:#1A1A2E;background:white";
+  div.style.cssText = "font-family:'Segoe UI',sans-serif;padding:24px;color:#1A1A2E;background:white";
   div.innerHTML = html;
   document.body.appendChild(div);
   var style = document.createElement("style");
