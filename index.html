@@ -26,6 +26,8 @@
       { id: "offtask", label: "Off-Task Talking", emoji: "🔇", points: -1, color: "#E05C5C" },
     ];
 
+    const ENTRANCE_REMOVE = { id: "entrance_remove", label: "Remove Entrance Ticket", emoji: "🎫", points: -1, color: "#4C9B82", isRemove: true };
+
     const DEFAULT_STUDENTS = [
       "Aaliyah", "Brandon", "Celeste", "David", "Esther",
       "Felix", "Grace", "Henry", "Isabel", "James",
@@ -97,7 +99,10 @@
             };
           })
         );
-        showUndoToast(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
+        const actionLabel = cat.isRemove
+          ? `Removed Entrance Ticket from ${students[studentIdx].name}`
+          : `${cat.emoji} ${cat.label} → ${students[studentIdx].name}`;
+        showUndoToast(actionLabel);
       };
 
       const awardAll = (cat) => {
@@ -250,6 +255,14 @@
                       </span>
                     </button>
                   ))}
+                </div>
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #D0EAE3" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#999", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Remove</div>
+                  <button onClick={(e) => { e.stopPropagation(); award(selected, ENTRANCE_REMOVE); }}
+                    style={{ background: "white", color: "#4C9B82", border: "2px dashed #4C9B82", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                    🎫 Remove Entrance Ticket
+                    <span style={{ background: "#4C9B8218", borderRadius: 6, padding: "2px 7px", fontSize: 12, color: "#C0392B", fontWeight: 700 }}>−1</span>
+                  </button>
                 </div>
               </div>
             )}
