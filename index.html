@@ -36,17 +36,22 @@
 
     const STORAGE_KEY = "participation_tracker_students";
 
+    const POINTS_KEY = "participation_tracker_points";
+
     const loadStudents = () => {
       const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      let savedPoints = {};
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          // Keep names but reset points, log, and attendance every page load
-          return parsed.map((s) => ({ ...s, points: 0, log: [], attendance: "absent", absentDate: today }));
-        }
+        const raw = localStorage.getItem(POINTS_KEY);
+        if (raw) savedPoints = JSON.parse(raw);
       } catch (e) {}
-      return DEFAULT_STUDENTS.map((name) => ({ name, points: 0, log: [], attendance: "absent", absentDate: today }));
+      return DEFAULT_STUDENTS.map((name) => ({
+        name,
+        points: savedPoints[name] || 0,
+        log: [],
+        attendance: "absent",
+        absentDate: today,
+      }));
     };
 
     function App() {
@@ -86,6 +91,10 @@
       useEffect(() => {
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+          // Persist accumulated points separately by name
+          const pts = {};
+          students.forEach(s => { pts[s.name] = s.points; });
+          localStorage.setItem(POINTS_KEY, JSON.stringify(pts));
           setSavedToast(true);
           const t = setTimeout(() => setSavedToast(false), 1500);
           return () => clearTimeout(t);
@@ -168,6 +177,7 @@
       const resetAll = () => {
         snapshot(students);
         setStudents(students.map((s) => ({ ...s, points: 0, log: [] })));
+        try { localStorage.removeItem(POINTS_KEY); } catch(e) {}
         setSelected(null);
         setResetConfirm(false);
         showUndoToast("All points reset");
