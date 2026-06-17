@@ -17,7 +17,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState } = React;
+    const { useState, useEffect } = React;
 
     const CATEGORIES = [
       { id: "entrance", label: "Entrance Ticket", emoji: "🎫", points: 1, color: "#4C9B82" },
@@ -32,10 +32,18 @@
       "Kira", "Leo", "Maya", "Nathan", "Olivia",
     ];
 
-    const INIT = DEFAULT_STUDENTS.map((name) => ({ name, points: 0, log: [] }));
+    const STORAGE_KEY = "participation_tracker_students";
+
+    const loadStudents = () => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+      return DEFAULT_STUDENTS.map((name) => ({ name, points: 0, log: [] }));
+    };
 
     function App() {
-      const [students, setStudents] = useState(INIT);
+      const [students, setStudents] = useState(loadStudents);
       const [history, setHistory] = useState([]);
       const [selected, setSelected] = useState(null);
       const [newName, setNewName] = useState("");
@@ -44,6 +52,16 @@
       const [flashAll, setFlashAll] = useState(null);
       const [resetConfirm, setResetConfirm] = useState(false);
       const [undoToast, setUndoToast] = useState(null);
+      const [savedToast, setSavedToast] = useState(false);
+
+      useEffect(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+          setSavedToast(true);
+          const t = setTimeout(() => setSavedToast(false), 1500);
+          return () => clearTimeout(t);
+        } catch (e) {}
+      }, [students]);
 
       const snapshot = (current) => {
         setHistory((h) => [...h.slice(-19), current]);
@@ -140,6 +158,9 @@
             <div>
               <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#7EC8A4", fontWeight: 600, marginBottom: 2 }}>Classroom Tool</div>
               <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: -0.5 }}>Participation Tracker</h1>
+              <div style={{ fontSize: 11, color: savedToast ? "#7EC8A4" : "rgba(255,255,255,0.3)", marginTop: 3, transition: "color 0.3s" }}>
+                {savedToast ? "✓ Saved to this browser" : "Auto-saves to your browser"}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 8, padding: "4px 6px", display: "flex", gap: 4 }}>
