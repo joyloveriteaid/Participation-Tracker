@@ -41,7 +41,8 @@
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) return JSON.parse(saved);
       } catch (e) {}
-      return DEFAULT_STUDENTS.map((name) => ({ name, points: 0, log: [], attendance: null }));
+      const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      return DEFAULT_STUDENTS.map((name) => ({ name, points: 0, log: [], attendance: "absent", absentDate: today }));
     };
 
     function App() {
@@ -57,7 +58,6 @@
       const [resetConfirm, setResetConfirm] = useState(false);
       const [undoToast, setUndoToast] = useState(null);
       const [savedToast, setSavedToast] = useState(false);
-      const [attendanceMode, setAttendanceMode] = useState(false);
 
       useEffect(() => {
         const handleClickOutside = (e) => {
@@ -74,12 +74,11 @@
         const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
         setStudents((prev) => prev.map((s, i) => {
           if (i !== idx) return s;
-          const next = s.attendance === "absent" ? "present" : "absent";
+          const next = s.attendance === "present" ? "absent" : "present";
           return { ...s, attendance: next, absentDate: next === "absent" ? today : s.absentDate };
         }));
       };
 
-      // Auto-save to localStorage whenever students changes
       useEffect(() => {
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
@@ -108,6 +107,7 @@
       };
 
       const award = (studentIdx, cat) => {
+        if (students[studentIdx].attendance !== "present") return;
         snapshot(students);
         const now = new Date();
         setStudents((prev) =>
@@ -133,7 +133,7 @@
         const date = now.toLocaleDateString([], { month: "short", day: "numeric" });
         setStudents((prev) =>
           prev.map((s) => {
-            if (s.attendance === "absent") return s;
+            if (s.attendance !== "present") return s;
             return {
               ...s,
               points: s.points + cat.points,
@@ -150,7 +150,8 @@
         const trimmed = newName.trim();
         if (!trimmed) return;
         snapshot(students);
-        setStudents((prev) => [...prev, { name: trimmed, points: 0, log: [], attendance: null }]);
+        const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+        setStudents((prev) => [...prev, { name: trimmed, points: 0, log: [], attendance: "absent", absentDate: today }]);
         setNewName("");
       };
 
@@ -166,14 +167,6 @@
         setSelected(null);
         setResetConfirm(false);
         showUndoToast("All points reset");
-      };
-
-      const resetAttendance = () => {
-        snapshot(students);
-        const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-        setStudents(prev => prev.map((s) => ({ ...s, attendance: "absent", absentDate: today })));
-        setResetConfirm(false);
-        showUndoToast("Attendance reset");
       };
 
       const [exporting, setExporting] = useState(false);
@@ -219,9 +212,16 @@
       const getCardBg = (pts) => pts >= 5 ? "#FFF8E7" : pts < 0 ? "#FFF1F1" : "#FFFFFF";
       const getPointColor = (pts) => pts > 0 ? "#2E7D5E" : pts < 0 ? "#C0392B" : "#888";
 
+      const getAttendanceLabel = (att) => {
+        if (att === "present") return { icon: "✅", label: "Present", color: "#4C9B82", bg: "#E8F5F0", border: "#4C9B82" };
+        if (att === "absent") return { icon: "❌", label: "Absent", color: "#E05C5C", bg: "#FFF1F1", border: "#E05C5C" };
+        return { icon: "○", label: "Mark", color: "#bbb", bg: "#F5F5F5", border: "#ddd" };
+      };
+
       return (
         <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", minHeight: "100vh", background: "#F5F7FA", color: "#1A1A2E" }}>
 
+          {/* Header */}
           <div style={{ background: "linear-gradient(135deg, #1A1A2E 0%, #16213E 100%)", color: "white", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#7EC8A4", fontWeight: 600, marginBottom: 2 }}>Classroom Tool</div>
@@ -238,10 +238,6 @@
                   </button>
                 ))}
               </div>
-              <button onClick={() => { if (attendanceMode) { resetAttendance(); setAttendanceMode(false); } else { const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }); setStudents(prev => prev.map(s => ({ ...s, attendance: "absent", absentDate: today }))); setAttendanceMode(true); } }}
-                style={{ background: attendanceMode ? "#4C9B82" : "rgba(255,255,255,0.1)", color: "white", border: `1px solid ${attendanceMode ? "#4C9B82" : "rgba(255,255,255,0.2)"}`, borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: "pointer", fontWeight: attendanceMode ? 700 : 400 }}>
-                📋 Attendance
-              </button>
               <button onClick={exportToSheets} disabled={exporting}
                 style={{ background: exporting ? "rgba(255,255,255,0.05)" : "rgba(52,168,83,0.2)", color: exporting ? "rgba(255,255,255,0.3)" : "#6FCF97", border: "1px solid rgba(52,168,83,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: exporting ? "default" : "pointer", fontWeight: 600 }}>
                 {exporting ? "Exporting…" : "📊 Export"}
@@ -264,6 +260,7 @@
             </div>
           </div>
 
+          {/* Legend bar */}
           <div style={{ background: "#1A1A2E", padding: "10px 24px 14px", display: "flex", gap: 12, flexWrap: "wrap" }}>
             {CATEGORIES.map((c) => (
               <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
@@ -271,8 +268,13 @@
                 {c.emoji} {c.label} <span style={{ color: c.points > 0 ? "#7EC8A4" : "#E05C5C", fontWeight: 700 }}>{c.points > 0 ? "+" : ""}{c.points}</span>
               </div>
             ))}
+            {/* Attendance legend */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+              <span>📋 Attendance bar on each card → tap to cycle</span>
+            </div>
           </div>
 
+          {/* Toasts */}
           {undoToast && (
             <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#1A1A2E", color: "white", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", zIndex: 999, fontSize: 14, border: "1px solid rgba(255,255,255,0.1)", whiteSpace: "nowrap" }}>
               <span style={{ color: "#aaa" }}>Awarded: <strong style={{ color: "white" }}>{undoToast.label}</strong></span>
@@ -294,6 +296,7 @@
 
           <div style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
 
+            {/* Add student */}
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input value={newName} onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addStudent()}
@@ -304,21 +307,27 @@
               </button>
             </div>
 
-            {attendanceMode && (
-              <div style={{ background: "white", borderRadius: 14, border: "2px solid #4C9B82", padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>📋 Attendance Mode — tap a student card to toggle</div>
-                <div style={{ display: "flex", gap: 12, fontSize: 13 }}>
-                  <span style={{ color: "#4C9B82", fontWeight: 700 }}>✅ Present: {students.filter(s => s.attendance === "present").length}</span>
-                  <span style={{ color: "#E05C5C", fontWeight: 700 }}>❌ Absent: {students.filter(s => s.attendance === "absent").length}</span>
-                  <span style={{ color: "#aaa", fontWeight: 600 }}>— Unmarked: {students.filter(s => s.attendance === null).length}</span>
-                </div>
-                <button onClick={() => setStudents(prev => prev.map(s => ({ ...s, attendance: null })))}
-                  style={{ marginLeft: "auto", background: "none", border: "1px solid #ddd", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#888", cursor: "pointer" }}>
-                  Clear All
-                </button>
+            {/* Attendance summary banner */}
+            <div style={{ background: "white", borderRadius: 14, border: "2px solid #E8EBF0", padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>📋 Attendance</div>
+              <div style={{ display: "flex", gap: 12, fontSize: 13 }}>
+                <span style={{ color: "#4C9B82", fontWeight: 700 }}>✅ Present: {students.filter(s => s.attendance === "present").length}</span>
+                <span style={{ color: "#E05C5C", fontWeight: 700 }}>❌ Absent: {students.filter(s => s.attendance === "absent").length}</span>
+                <span style={{ color: "#aaa", fontWeight: 600 }}>○ Unmarked: {students.filter(s => s.attendance === null).length}</span>
               </div>
-            )}
+              <button
+                onClick={() => { snapshot(students); setStudents(prev => prev.map(s => ({ ...s, attendance: null }))); }}
+                style={{ marginLeft: "auto", background: "none", border: "1px solid #ddd", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#888", cursor: "pointer" }}>
+                Clear All
+              </button>
+              <button
+                onClick={() => { snapshot(students); const today = new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }); setStudents(prev => prev.map(s => ({ ...s, attendance: "present" }))); showUndoToast("All marked present"); }}
+                style={{ background: "#E8F5F0", border: "1px solid #4C9B82", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#4C9B82", fontWeight: 700, cursor: "pointer" }}>
+                ✅ All Present
+              </button>
+            </div>
 
+            {/* Give All bar */}
             <div style={{ background: "white", borderRadius: 14, border: "2px solid #E8EBF0", padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#555", whiteSpace: "nowrap" }}>👥 Give All:</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -334,32 +343,47 @@
               </div>
             </div>
 
+            {/* Grid view */}
             {view === "grid" && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
                 {students.map((s, i) => {
                   const badge = getBadge(s.points);
                   const flashCat = CATEGORIES.find(c => c.id === flashAll);
+                  const att = getAttendanceLabel(s.attendance);
                   return (
-                    <div key={i} onClick={(e) => {
-                        if (attendanceMode) { toggleAttendance(i); return; }
-                        if (selected === i) { setSelected(null); setPopoverPos(null); return; }
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setPopoverPos({ top: rect.top + window.scrollY, left: rect.left, width: rect.width, height: rect.height });
-                        setSelected(i);
-                      }}
-                      style={{ background: flashAll ? `${flashCat.color}18` : s.attendance === "absent" ? "#FFF1F1" : selected === i ? "#E8F5F0" : getCardBg(s.points), border: flashAll ? `2px solid ${flashCat.color}` : s.attendance === "absent" ? "2px solid #E05C5C" : s.attendance === "present" ? "2px solid #4C9B82" : selected === i ? "2px solid #4C9B82" : "2px solid #E8EBF0", borderRadius: 14, padding: "14px 12px", cursor: "pointer", transition: "all 0.15s", boxShadow: selected === i ? "0 4px 16px rgba(76,155,130,0.2)" : "0 2px 6px rgba(0,0,0,0.05)", position: "relative", opacity: s.attendance === "absent" ? 0.6 : 1 }}>
-                      {badge && !attendanceMode && <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14 }}>{badge.icon}</div>}
-                      {attendanceMode && s.attendance !== null && (
-                        <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14 }}>
-                          {s.attendance === "present" ? "✅" : "❌"}
+                    <div key={i}
+                      style={{ background: flashAll ? `${flashCat.color}18` : selected === i ? "#E8F5F0" : getCardBg(s.points), border: flashAll ? `2px solid ${flashCat.color}` : selected === i ? "2px solid #4C9B82" : "2px solid #E8EBF0", borderRadius: 14, overflow: "hidden", cursor: "default", transition: "all 0.15s", boxShadow: selected === i ? "0 4px 16px rgba(76,155,130,0.2)" : "0 2px 6px rgba(0,0,0,0.05)", position: "relative", opacity: s.attendance === "absent" ? 0.65 : 1 }}>
+
+                      {/* ── Attendance strip (top) ── */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleAttendance(i); }}
+                        title="Click to toggle attendance"
+                        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: att.bg, border: "none", borderBottom: `1px solid ${att.border}30`, cursor: "pointer", fontSize: 11, fontWeight: 700, color: att.color, gap: 4 }}>
+                        <span>{att.icon} {att.label}</span>
+                        <span style={{ fontSize: 10, color: "#bbb", fontWeight: 400 }}>tap</span>
+                      </button>
+
+                      {/* ── Points body (click to award) ── */}
+                      <div
+                        onClick={(e) => {
+                          if (s.attendance !== "present") return;
+                          if (selected === i) { setSelected(null); setPopoverPos(null); return; }
+                          const rect = e.currentTarget.parentElement.getBoundingClientRect();
+                          setPopoverPos({ top: rect.top + window.scrollY, left: rect.left, width: rect.width, height: rect.height });
+                          setSelected(i);
+                        }}
+                        data-card-body="true"
+                        style={{ padding: "12px 12px 8px", cursor: s.attendance === "present" ? "pointer" : "default" }}>
+                        {badge && <div style={{ position: "absolute", top: 34, right: 8, fontSize: 14 }}>{badge.icon}</div>}
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 6, paddingRight: 18 }}>{s.name}</div>
+                        <div style={{ fontSize: 30, fontWeight: 800, color: getPointColor(s.points), lineHeight: 1 }}>
+                          {s.points > 0 ? "+" : ""}{s.points}
                         </div>
-                      )}
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 6, paddingRight: 18 }}>{s.name}</div>
-                      <div style={{ fontSize: 30, fontWeight: 800, color: getPointColor(s.points), lineHeight: 1 }}>
-                        {s.points > 0 ? "+" : ""}{s.points}
+                        <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>{s.attendance === "present" ? "tap to award" : "mark present to award"}</div>
                       </div>
-                      <div style={{ fontSize: 10, color: "#999", marginTop: 4 }}>pts</div>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: "1px solid #EEE" }}>
+
+                      {/* ── Footer ── */}
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px 8px", borderTop: "1px solid #EEE" }}>
                         <button onClick={(e) => { e.stopPropagation(); setShowLog(showLog === i ? null : i); }}
                           style={{ background: "none", border: "none", fontSize: 11, color: "#888", cursor: "pointer", padding: 0 }}>
                           📋 {s.log.length}
@@ -369,8 +393,9 @@
                           ✕
                         </button>
                       </div>
+
                       {showLog === i && s.log.length > 0 && (
-                        <div style={{ marginTop: 8, fontSize: 11, color: "#555" }}>
+                        <div style={{ padding: "0 10px 8px", fontSize: 11, color: "#555" }}>
                           {s.log.slice(0, 5).map((entry, ei) => (
                             <div key={ei} style={{ padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
                               <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -388,32 +413,42 @@
               </div>
             )}
 
+            {/* Leaderboard view */}
             {view === "leaderboard" && (
               <div style={{ background: "white", borderRadius: 16, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}>
-                <div style={{ padding: "14px 20px", background: "#F8F9FC", borderBottom: "1px solid #E8EBF0", display: "grid", gridTemplateColumns: "40px 1fr 80px 80px 80px", gap: 12, fontSize: 11, fontWeight: 700, color: "#999", textTransform: "uppercase", letterSpacing: 1 }}>
-                  <div>#</div><div>Student</div><div style={{ textAlign: "center" }}>Events</div><div style={{ textAlign: "center" }}>Status</div><div style={{ textAlign: "right" }}>Points</div>
+                <div style={{ padding: "14px 20px", background: "#F8F9FC", borderBottom: "1px solid #E8EBF0", display: "grid", gridTemplateColumns: "40px 1fr 80px 130px 80px", gap: 12, fontSize: 11, fontWeight: 700, color: "#999", textTransform: "uppercase", letterSpacing: 1 }}>
+                  <div>#</div><div>Student</div><div style={{ textAlign: "center" }}>Events</div><div style={{ textAlign: "center" }}>Attendance</div><div style={{ textAlign: "right" }}>Points</div>
                 </div>
                 {sorted.map((s, rank) => {
                   const badge = getBadge(s.points);
                   const medal = rank === 0 ? "🥇" : rank === 1 ? "🥈" : rank === 2 ? "🥉" : null;
+                  const att = getAttendanceLabel(s.attendance);
                   return (
-                    <div key={s.origIdx} onClick={(e) => {
-                        if (attendanceMode) { toggleAttendance(s.origIdx); return; }
-                        if (selected === s.origIdx) { setSelected(null); setPopoverPos(null); return; }
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setPopoverPos({ top: rect.top + window.scrollY, left: rect.left, width: rect.width, height: rect.height });
-                        setSelected(s.origIdx);
-                      }}
-                      style={{ display: "grid", gridTemplateColumns: "40px 1fr 80px 80px 80px", gap: 12, padding: "14px 20px", borderBottom: "1px solid #F0F2F6", cursor: "pointer", background: selected === s.origIdx ? "#E8F5F0" : rank < 3 ? "#FAFBFF" : "white", transition: "background 0.1s", alignItems: "center", opacity: s.attendance === "absent" ? 0.55 : 1 }}>
-                      <div style={{ fontSize: 15, textAlign: "center" }}>{medal || <span style={{ color: "#ccc", fontSize: 13 }}>{rank + 1}</span>}</div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name} {badge && <span style={{ fontSize: 13 }}>{badge.icon}</span>}</div>
-                      <div style={{ textAlign: "center", fontSize: 13, color: "#888" }}>{s.log.length}</div>
-                      <div style={{ textAlign: "center", fontSize: 13 }}>
-                        {s.attendance === "present" ? <span style={{ color: "#4C9B82", fontWeight: 700 }}>✅ Present</span>
-                          : s.attendance === "absent" ? <span style={{ color: "#E05C5C", fontWeight: 700 }}>❌ Absent</span>
-                          : <span style={{ color: "#ccc" }}>—</span>}
+                    <div key={s.origIdx}
+                      style={{ display: "grid", gridTemplateColumns: "40px 1fr 80px 130px 80px", gap: 12, padding: "0 20px", borderBottom: "1px solid #F0F2F6", background: selected === s.origIdx ? "#E8F5F0" : rank < 3 ? "#FAFBFF" : "white", transition: "background 0.1s", alignItems: "center", opacity: s.attendance === "absent" ? 0.55 : 1 }}>
+                      <div style={{ fontSize: 15, textAlign: "center", padding: "14px 0" }}>{medal || <span style={{ color: "#ccc", fontSize: 13 }}>{rank + 1}</span>}</div>
+                      <div
+                        style={{ fontWeight: 600, fontSize: 14, cursor: s.attendance === "present" ? "pointer" : "default", padding: "14px 0" }}
+                        onClick={(e) => {
+                          if (s.attendance !== "present") return;
+                          if (selected === s.origIdx) { setSelected(null); setPopoverPos(null); return; }
+                          const rect = e.currentTarget.closest('[data-lb-row]') ? e.currentTarget.closest('[data-lb-row]').getBoundingClientRect() : e.currentTarget.getBoundingClientRect();
+                          setPopoverPos({ top: rect.top + window.scrollY, left: rect.left, width: rect.width, height: rect.height });
+                          setSelected(s.origIdx);
+                        }}>
+                        {s.name} {badge && <span style={{ fontSize: 13 }}>{badge.icon}</span>}
+                        <span style={{ display: "block", fontSize: 10, color: "#aaa", fontWeight: 400 }}>{s.attendance === "present" ? "tap to award pts" : "mark present to award"}</span>
                       </div>
-                      <div style={{ textAlign: "right", fontWeight: 800, fontSize: 18, color: getPointColor(s.points) }}>
+                      <div style={{ textAlign: "center", fontSize: 13, color: "#888", padding: "14px 0" }}>{s.log.length}</div>
+                      {/* Attendance toggle in leaderboard */}
+                      <div style={{ textAlign: "center", padding: "10px 0" }}>
+                        <button
+                          onClick={() => toggleAttendance(s.origIdx)}
+                          style={{ background: att.bg, border: `1px solid ${att.border}`, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: att.color, cursor: "pointer", whiteSpace: "nowrap" }}>
+                          {att.icon} {att.label}
+                        </button>
+                      </div>
+                      <div style={{ textAlign: "right", fontWeight: 800, fontSize: 18, color: getPointColor(s.points), padding: "14px 0" }}>
                         {s.points > 0 ? "+" : ""}{s.points}
                       </div>
                     </div>
@@ -422,11 +457,12 @@
               </div>
             )}
 
+            {/* Popover for awarding points */}
             {selected !== null && popoverPos && ReactDOM.createPortal(
               <div ref={popoverRef} style={{
                 position: "absolute",
                 top: (() => {
-                  const panelH = 160;
+                  const panelH = 200;
                   const spaceBelow = document.documentElement.scrollHeight - (popoverPos.top + popoverPos.height);
                   return spaceBelow > panelH
                     ? popoverPos.top + popoverPos.height + 8
@@ -441,15 +477,15 @@
                 boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
                 zIndex: 1000,
               }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>
-                    <span style={{ color: "#4C9B82" }}>{students[selected].name}</span>
+                    <span style={{ color: "#4C9B82" }}>🏅 Award points → {students[selected].name}</span>
                   </div>
                   <button onClick={() => { setSelected(null); setPopoverPos(null); }} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#aaa" }}>✕</button>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {CATEGORIES.map((cat) => (
-                    <button key={cat.id} onClick={(e) => { e.stopPropagation(); award(selected, cat); }}
+                    <button key={cat.id} onClick={(e) => { e.stopPropagation(); award(selected, cat); setSelected(null); setPopoverPos(null); }}
                       style={{ background: cat.color, color: "white", border: "none", borderRadius: 9, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
                       {cat.emoji} {cat.label}
                       <span style={{ background: "rgba(255,255,255,0.25)", borderRadius: 5, padding: "1px 6px", fontSize: 12 }}>
@@ -462,6 +498,7 @@
               document.body
             )}
 
+            {/* Stats footer */}
             <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap" }}>
               {CATEGORIES.map((cat) => {
                 const count = students.reduce((acc, s) => acc + s.log.filter((l) => l.label === cat.label).length, 0);
@@ -475,24 +512,33 @@
               })}
             </div>
 
-            {students.some(s => s.attendance === "absent") && (
-              <div style={{ marginTop: 16, background: "white", borderRadius: 14, border: "2px solid #E05C5C30", padding: "14px 18px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#E05C5C", marginBottom: 10 }}>❌ Absent Today</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {students.filter(s => s.attendance === "absent").map((s, i) => (
-                    <div key={i} style={{ background: "#FFF1F1", border: "1px solid #E05C5C30", borderRadius: 8, padding: "6px 12px", fontSize: 13 }}>
-                      <span style={{ fontWeight: 600, color: "#C0392B" }}>{s.name}</span>
-                      {s.absentDate && <span style={{ color: "#aaa", fontSize: 11, marginLeft: 6 }}>{s.absentDate}</span>}
-                    </div>
-                  ))}
-                </div>
+            {/* Absent list — always visible */}
+            <div style={{ marginTop: 16, background: "white", borderRadius: 14, border: "2px solid #E05C5C40", padding: "14px 18px" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#E05C5C", marginBottom: 10 }}>
+                ❌ Absent / Unmarked ({students.filter(s => s.attendance !== "present").length})
               </div>
-            )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {students.filter(s => s.attendance !== "present").length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#aaa" }}>✅ All students are marked present.</div>
+                ) : (
+                  students.filter(s => s.attendance !== "present").map((s, i) => (
+                    <button key={i}
+                      onClick={() => toggleAttendance(students.indexOf(s))}
+                      style={{ background: s.attendance === "absent" ? "#FFF1F1" : "#F5F5F5", border: `1px solid ${s.attendance === "absent" ? "#E05C5C40" : "#ddd"}`, borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", textAlign: "left" }}>
+                      <span style={{ fontWeight: 600, color: s.attendance === "absent" ? "#C0392B" : "#888" }}>{s.name}</span>
+                      <span style={{ color: "#aaa", fontSize: 10, marginLeft: 6 }}>{s.attendance === "absent" ? "absent" : "unmarked"} · tap to mark present</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
       );
     }
 
+    // Wrap card divs need data-card attribute for popover positioning — patch onClick to use parentElement
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
