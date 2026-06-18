@@ -696,6 +696,7 @@ function App({ authToken, onLogout }) {
   const [giveAllHistory, setGiveAllHistory] = useState([]);
   const [showEndDayConfirm, setShowEndDayConfirm] = useState(false);
   const [showRosterImport, setShowRosterImport] = useState(false);
+  const [showSemesterReset, setShowSemesterReset] = useState(false);
   const [sortBy, setSortBy] = useState("roster"); // roster | first | last
   const saveTimerRef = useRef(null);
   const isFirstLoad = useRef(true);
@@ -904,6 +905,21 @@ function App({ authToken, onLogout }) {
     setSelected(null);
     setGiveAllHistory([]);
     showUndoMsg("All data cleared");
+  };
+
+  const masterReset = () => {
+    const newData = {};
+    PERIODS.forEach(p => {
+      newData[p] = (allPeriodData[p] || []).map(s => ({
+        ...s, points:0, log:[], history:[], totalPoints:0, attendance:"absent", parentNote:"", notes:""
+      }));
+      savePeriodDataLocal(p, newData[p]);
+    });
+    setAllPeriodData(newData);
+    setSelected(null);
+    setGiveAllHistory([]);
+    setShowSemesterReset(false);
+    showUndoMsg("Semester reset — all data cleared, roster kept");
   };
 
   const saveNote = () => {
@@ -1391,6 +1407,33 @@ function App({ authToken, onLogout }) {
             <div style={{ display:"flex", gap:8, marginTop:14, justifyContent:"flex-end" }}>
               <button onClick={() => { setEditNoteFor(null); setNoteText(""); }} style={{ background:"none", border:"2px solid #E0E4EC", borderRadius:9, padding:"8px 18px", fontSize:13, cursor:"pointer" }}>Cancel</button>
               <button onClick={saveNote} style={{ background:"#4C9B82", color:"white", border:"none", borderRadius:9, padding:"8px 20px", fontSize:13, fontWeight:700, cursor:"pointer" }}>Save Note</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SEMESTER RESET MODAL ── */}
+      {showSemesterReset && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+          <div style={{ background:"white", borderRadius:20, padding:32, maxWidth:420, width:"100%", boxShadow:"0 24px 64px rgba(0,0,0,0.35)" }}>
+            <div style={{ fontSize:40, textAlign:"center", marginBottom:16 }}>🔄</div>
+            <h2 style={{ margin:"0 0 10px", fontSize:20, fontWeight:800, color:"#1A1A2E", textAlign:"center" }}>New Semester Reset</h2>
+            <p style={{ fontSize:13, color:"#666", textAlign:"center", lineHeight:1.6, marginBottom:20 }}>
+              This will <strong>permanently delete</strong> all points, logs, and history for every student across all periods.<br/><br/>
+              <span style={{ color:"#4C9B82", fontWeight:700 }}>✅ Your roster (student names) will be kept.</span>
+            </p>
+            <div style={{ background:"#FFF1F1", border:"1px solid #E05C5C40", borderRadius:10, padding:"10px 14px", fontSize:12, color:"#C0392B", marginBottom:20, textAlign:"center" }}>
+              ⚠️ This cannot be undone. Export your data first if you want a backup.
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={() => setShowSemesterReset(false)}
+                style={{ flex:1, background:"none", border:"2px solid #E0E4EC", borderRadius:10, padding:"11px", fontSize:14, cursor:"pointer", color:"#666", fontWeight:600 }}>
+                Cancel
+              </button>
+              <button onClick={masterReset}
+                style={{ flex:1, background:"#E05C5C", color:"white", border:"none", borderRadius:10, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+                Yes, Reset Everything
+              </button>
             </div>
           </div>
         </div>
