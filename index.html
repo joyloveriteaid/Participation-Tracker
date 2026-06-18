@@ -218,6 +218,121 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
   return `<h1 style="font-size:20px;font-weight:800;margin:0 0 4px">${className} — Participation Reports</h1><div style="font-size:13px;color:#888;margin-bottom:20px">${teacherName} · ${dateLabel}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">${cards}</div>`;
 }
 
+// ─── IMPORT ROSTER MODAL ────────────────────────────────────────────────────
+function ImportRosterModal({ onClose, onImport }) {
+  const [activePeriod, setActivePeriod] = useState("P1");
+  const [rosterText, setRosterText] = useState({ P1:"", P2:"", P3:"", P4:"", P5:"" });
+  const [preview, setPreview] = useState({ P1:[], P2:[], P3:[], P4:[], P5:[] });
+
+  const parseNames = (text) => {
+    return text.split(/[\n\r]+/)
+      .map(n => n.trim())
+      .filter(n => n.length > 0 && n.length < 60);
+  };
+
+  const handlePaste = (period, text) => {
+    setRosterText(prev => ({ ...prev, [period]: text }));
+    setPreview(prev => ({ ...prev, [period]: parseNames(text) }));
+  };
+
+  const totalNames = Object.values(preview).reduce((sum, arr) => sum + arr.length, 0);
+
+  const handleImport = () => {
+    const result = {};
+    PERIODS.forEach(p => {
+      result[p] = preview[p].map(name => ({
+        name, points: 0, log: [], attendance: "absent",
+        notes: "", parentNote: "", history: [], totalPoints: 0
+      }));
+    });
+    onImport(result);
+    onClose();
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:3000, background:"rgba(0,0,0,0.65)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div style={{ background:"white", borderRadius:16, width:"100%", maxWidth:560, maxHeight:"90vh", overflow:"hidden", display:"flex", flexDirection:"column", boxShadow:"0 24px 64px rgba(0,0,0,0.3)" }}>
+        
+        {/* Header */}
+        <div style={{ background:"linear-gradient(135deg,#1A1A2E,#16213E)", color:"white", padding:"18px 22px", flexShrink:0 }}>
+          <div style={{ fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#7EC8A4", fontWeight:600, marginBottom:4 }}>Setup</div>
+          <div style={{ fontSize:18, fontWeight:700 }}>Import Class Roster</div>
+          <div style={{ fontSize:12, color:"rgba(255,255,255,0.5)", marginTop:4 }}>
+            Paste names from Google Sheets — one name per row, or comma-separated
+          </div>
+        </div>
+
+        {/* Period tabs */}
+        <div style={{ display:"flex", borderBottom:"2px solid #E8EBF0", flexShrink:0, overflowX:"auto" }}>
+          {PERIODS.map(p => {
+            const pc = PERIOD_COLORS[p];
+            const count = preview[p].length;
+            const isActive = p === activePeriod;
+            return (
+              <button key={p} onClick={() => setActivePeriod(p)}
+                style={{ flex:1, padding:"10px 8px", border:"none", borderBottom: isActive ? `3px solid ${pc.accent}` : "3px solid transparent", background: isActive ? pc.bg : "white", cursor:"pointer", fontSize:12, fontWeight:isActive?700:500, color: isActive ? pc.text : "#999", minWidth:70, transition:"all 0.15s" }}>
+                <div style={{ fontWeight:800 }}>{p}</div>
+                <div style={{ fontSize:10, color: count > 0 ? pc.accent : "#ccc", marginTop:2 }}>
+                  {count > 0 ? `${count} students` : "empty"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Content */}
+        <div style={{ padding:20, flex:1, overflowY:"auto" }}>
+          <div style={{ marginBottom:10, fontSize:13, color:"#555", fontWeight:600 }}>
+            {activePeriod} — Paste your roster below
+          </div>
+          <div style={{ fontSize:12, color:"#999", marginBottom:10, background:"#F8F9FC", borderRadius:8, padding:"8px 12px", lineHeight:1.6 }}>
+            💡 In Google Sheets: select the column of names → Ctrl+C → paste here
+          </div>
+          <textarea
+            value={rosterText[activePeriod]}
+            onChange={e => handlePaste(activePeriod, e.target.value)}
+            placeholder={"Aaliyah Johnson\nBrandon Lee\nCeleste Rivera\n..."}
+            rows={8}
+            style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", lineHeight:1.6 }}
+          />
+
+          {/* Preview */}
+          {preview[activePeriod].length > 0 && (
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#4C9B82", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>
+                ✅ {preview[activePeriod].length} students detected
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                {preview[activePeriod].map((name, i) => (
+                  <div key={i} style={{ background:PERIOD_COLORS[activePeriod].bg, color:PERIOD_COLORS[activePeriod].text, border:`1px solid ${PERIOD_COLORS[activePeriod].accent}40`, borderRadius:20, padding:"3px 12px", fontSize:12, fontWeight:600 }}>
+                    {name}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding:"14px 20px", borderTop:"1px solid #E8EBF0", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, background:"#F8F9FC" }}>
+          <div style={{ fontSize:12, color:"#888" }}>
+            {totalNames > 0 ? <span style={{ color:"#4C9B82", fontWeight:700 }}>✅ {totalNames} students total across all periods</span> : "No names added yet"}
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={onClose} style={{ background:"none", border:"2px solid #E0E4EC", borderRadius:9, padding:"8px 18px", fontSize:13, cursor:"pointer", color:"#666" }}>
+              Cancel
+            </button>
+            <button onClick={handleImport} disabled={totalNames === 0}
+              style={{ background: totalNames > 0 ? "#4C9B82" : "#ccc", color:"white", border:"none", borderRadius:9, padding:"8px 22px", fontSize:13, fontWeight:700, cursor: totalNames > 0 ? "pointer" : "default" }}>
+              Import {totalNames > 0 ? `${totalNames} Students` : ""}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── PARENT REPORT MODAL ────────────────────────────────────────────────────
 function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   const [selectedPeriod, setSelectedPeriod] = useState("ALL");
@@ -416,6 +531,7 @@ function App() {
   const [rolloverToast, setRolloverToast] = useState(null);
   const [giveAllHistory, setGiveAllHistory] = useState([]);
   const [showEndDayConfirm, setShowEndDayConfirm] = useState(false);
+  const [showRosterImport, setShowRosterImport] = useState(false);
   const saveTimerRef = useRef(null);
   const isFirstLoad = useRef(true);
 
@@ -631,6 +747,23 @@ function App() {
     setEditNoteFor(null); setNoteText("");
   };
 
+  const handleRosterImport = (rosterByPeriod) => {
+    snapshot();
+    const newData = {};
+    PERIODS.forEach(p => {
+      // Merge: keep existing students not in new roster, add new ones
+      const existing = allPeriodData[p] || [];
+      const incoming = rosterByPeriod[p] || [];
+      if (incoming.length === 0) { newData[p] = existing; return; }
+      const existingNames = new Set(existing.map(s => s.name.toLowerCase()));
+      const newStudents = incoming.filter(s => !existingNames.has(s.name.toLowerCase()));
+      newData[p] = [...existing, ...newStudents];
+      savePeriodDataLocal(p, newData[p]);
+    });
+    setAllPeriodData(newData);
+    showUndoMsg("Roster imported successfully");
+  };
+
   const exportData = () => {
     const payload = { version: 1, exported: new Date().toISOString(), periods: allPeriodData };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -702,6 +835,10 @@ function App() {
                 </button>
               ))}
             </div>
+            <button onClick={() => setShowRosterImport(true)}
+              style={{ background:"rgba(255,209,102,0.2)", color:"#FFD166", border:"1px solid rgba(255,209,102,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              👥 Import Roster
+            </button>
             <button onClick={() => setShowReport(true)}
               style={{ background:"rgba(76,155,130,0.25)", color:"#7EC8A4", border:"1px solid rgba(76,155,130,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
               📋 Reports
@@ -1066,6 +1203,14 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── ROSTER IMPORT MODAL ── */}
+      {showRosterImport && (
+        <ImportRosterModal
+          onClose={() => setShowRosterImport(false)}
+          onImport={handleRosterImport}
+        />
       )}
 
       {/* ── REPORTS MODAL ── */}
