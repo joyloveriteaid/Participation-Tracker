@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,69 +26,99 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-// ─── SUPABASE CONFIG ────────────────────────────────────────────────────────
-const SUPABASE_URL = "https://rgyvkuyknchqijqxddvh.supabase.co";
-const SUPABASE_KEY = "sb_publishable_U3BrMwMgicyTDr2vC6lYLw_5iPu6lDt";
-const TABLE = "participation_tracker";
-const ROW_ID = "main";
+// ─── GOOGLE DRIVE CONFIG ──────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = "802301493781-k1r0erh4qiahh0gj3tb848qpe4o2vt8c.apps.googleusercontent.com";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const DRIVE_FILE_NAME = "participation-tracker-data.json";
 
-async function supabaseGet(token) {
+// ── Drive helpers ─────────────────────────────────────────────────────────────
+
+async function driveGetFileId(token) {
+  // Search in appDataFolder for our file
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27${encodeURIComponent(DRIVE_FILE_NAME)}%27&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.files && json.files.length > 0 ? json.files[0].id : null;
+}
+
+async function driveLoad(token) {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${ROW_ID}&select=data`, {
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": `Bearer ${token || SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-      }
-    });
+    const fileId = await driveGetFileId(token);
+    if (!fileId) return null;
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     if (!res.ok) return null;
-    const rows = await res.json();
-    return rows.length > 0 ? rows[0].data : null;
+    return await res.json();
   } catch(e) { return null; }
 }
 
-async function supabaseSave(data, token) {
+async function driveSave(token, data, existingFileId) {
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${ROW_ID}`, {
-      method: "PATCH",
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": `Bearer ${token || SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal",
-      },
-      body: JSON.stringify({ data, updated_at: new Date().toISOString() })
-    });
-  } catch(e) {}
+    const body = JSON.stringify(data);
+    const blob = new Blob([body], { type: "application/json" });
+
+    if (existingFileId) {
+      // PATCH existing file
+      const res = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
+        { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body }
+      );
+      return res.ok ? existingFileId : null;
+    } else {
+      // Create new file in appDataFolder
+      const meta = JSON.stringify({ name: DRIVE_FILE_NAME, parents: ["appDataFolder"] });
+      const form = new FormData();
+      form.append("metadata", new Blob([meta], { type: "application/json" }));
+      form.append("file", blob);
+      const res = await fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+        { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
+      );
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.id || null;
+    }
+  } catch(e) { return null; }
 }
 
-// ─── SUPABASE AUTH ──────────────────────────────────────────────────────────
-async function supabaseSignIn(email, password) {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password })
-    });
-    const data = await res.json();
-    if (!res.ok) return { error: data.error_description || data.msg || "Login failed" };
-    return { token: data.access_token, user: data.user };
-  } catch(e) { return { error: "Network error" }; }
+async function driveRevokeToken(token) {
+  try { await fetch(`https://oauth2.googleapis.com/revoke?token=${token}`, { method: "POST" }); } catch(e) {}
 }
 
-async function supabaseSignOut(token) {
-  try {
-    await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
-      method: "POST",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}` }
-    });
-  } catch(e) {}
+// ── OAuth implicit flow ───────────────────────────────────────────────────────
+
+function buildAuthUrl(nonce) {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: window.location.origin + window.location.pathname,
+    response_type: "token",
+    scope: DRIVE_SCOPE,
+    state: nonce,
+    prompt: "select_account",
+  });
+  return "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString();
 }
 
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────
+function parseHashToken() {
+  const hash = window.location.hash.substring(1);
+  const params = new URLSearchParams(hash);
+  const token = params.get("access_token");
+  const expiresIn = params.get("expires_in");
+  const state = params.get("state");
+  if (token) {
+    // Clean URL
+    window.history.replaceState(null, "", window.location.pathname);
+    return { token, expiresIn: parseInt(expiresIn || "3600", 10), state };
+  }
+  return null;
+}
+
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const PERIODS = ["P1", "P2", "P3", "P4", "P5"];
 
 const PERIOD_COLORS = {
@@ -101,32 +130,36 @@ const PERIOD_COLORS = {
 };
 
 const CATEGORIES = [
-  { id: "entrance",  label: "Entrance Ticket",     emoji: "🎫", points: 1,  color: "#4C9B82" },
-  { id: "turntalk",  label: "Turn & Talk",          emoji: "🗣️", points: 1,  color: "#E8934A" },
-  { id: "reasoning", label: "Answer + Reasoning",   emoji: "🧠", points: 1,  color: "#5B8DD9" },
-  { id: "vocab",     label: "Question + Vocab",     emoji: "📚", points: 1,  color: "#9B6DD1" },
-  { id: "sharework", label: "Share Work Publicly",  emoji: "🌟", points: 1,  color: "#D4A017" },
-  { id: "offtask",   label: "Off-Task/Talking",     emoji: "🔇", points: -1, color: "#E05C5C" },
+  { id: "entrance",  label: "Entrance Ticket",    emoji: "🎫", points: 1,  color: "#4C9B82" },
+  { id: "turntalk",  label: "Turn & Talk",         emoji: "🗣️", points: 1,  color: "#E8934A" },
+  { id: "reasoning", label: "Answer + Reasoning",  emoji: "🧠", points: 1,  color: "#5B8DD9" },
+  { id: "vocab",     label: "Question + Vocab",    emoji: "📚", points: 1,  color: "#9B6DD1" },
+  { id: "sharework", label: "Share Work Publicly", emoji: "🌟", points: 1,  color: "#D4A017" },
+  { id: "offtask",   label: "Off-Task/Talking",    emoji: "🔇", points: -1, color: "#E05C5C" },
 ];
 
 const DEFAULT_STUDENTS = {
-  P1: ["Aaliyah", "Brandon", "Celeste", "David", "Esther", "Felix", "Grace", "Henry"],
-  P2: ["Isabel", "James", "Kira", "Leo", "Maya", "Nathan", "Olivia", "Patrick"],
-  P3: ["Quinn", "Rosa", "Samuel", "Talia", "Ulric", "Vera", "Wesley", "Xena"],
-  P4: ["Yasmine", "Zachary", "Amara", "Ben", "Chloe", "Diego", "Elena", "Frank"],
-  P5: ["Gina", "Hector", "Iris", "Jake", "Karen", "Luis", "Mia", "Nora"],
+  P1: ["Aaliyah","Brandon","Celeste","David","Esther","Felix","Grace","Henry"],
+  P2: ["Isabel","James","Kira","Leo","Maya","Nathan","Olivia","Patrick"],
+  P3: ["Quinn","Rosa","Samuel","Talia","Ulric","Vera","Wesley","Xena"],
+  P4: ["Yasmine","Zachary","Amara","Ben","Chloe","Diego","Elena","Frank"],
+  P5: ["Gina","Hector","Iris","Jake","Karen","Luis","Mia","Nora"],
 };
 
-const STORAGE_BASE = "pt_v2_";
-const LAST_DATE_KEY = "pt_last_active_date";
+const STORAGE_BASE   = "pt_v2_";
+const LAST_DATE_KEY  = "pt_last_active_date";
+const TOKEN_KEY      = "pt_drive_token";
+const TOKEN_EXP_KEY  = "pt_drive_token_exp";
+const FILE_ID_KEY    = "pt_drive_file_id";
+const OAUTH_NONCE_KEY = "pt_oauth_nonce";
 
-// ─── DATE HELPERS ───────────────────────────────────────────────────────────
+// ─── DATE HELPERS ─────────────────────────────────────────────────────────────
 const getTodayDateStr = () => new Date().toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
-const getTodayStr = () => new Date().toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" });
-const getTimeStr = () => new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit" });
+const getTodayStr     = () => new Date().toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" });
+const getTimeStr      = () => new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit" });
 const getShortDateStr = () => new Date().toLocaleDateString("en-US", { month:"short", day:"numeric" });
 
-// ─── LOCAL STORAGE HELPERS (fallback) ───────────────────────────────────────
+// ─── LOCAL STORAGE ────────────────────────────────────────────────────────────
 const loadPeriodDataLocal = (period) => {
   try {
     const raw = localStorage.getItem(STORAGE_BASE + period);
@@ -135,13 +168,12 @@ const loadPeriodDataLocal = (period) => {
       return data.map(s => ({
         ...s,
         history: s.history || [],
-        totalPoints: (s.history || []).reduce((sum, day) => sum + (day.points || 0), 0),
+        totalPoints: (s.history || []).reduce((sum, d) => sum + (d.points || 0), 0),
       }));
     }
   } catch(e) {}
   return DEFAULT_STUDENTS[period].map(name => ({
-    name, points: 0, log: [], attendance: "absent",
-    notes: "", parentNote: "", history: [], totalPoints: 0
+    name, points: 0, log: [], attendance: "absent", notes: "", parentNote: "", history: [], totalPoints: 0
   }));
 };
 
@@ -150,7 +182,7 @@ const savePeriodDataLocal = (period, students) => {
 };
 
 const getLastActiveDate = () => localStorage.getItem(LAST_DATE_KEY) || "";
-const setLastActiveDate = (d) => localStorage.setItem(LAST_DATE_KEY, d);
+const setLastActiveDate = d => localStorage.setItem(LAST_DATE_KEY, d);
 
 const buildDefaultAllData = () => {
   const data = {};
@@ -158,7 +190,20 @@ const buildDefaultAllData = () => {
   return data;
 };
 
-// ─── AUTO-ROLLOVER ───────────────────────────────────────────────────────────
+const hydrateAllData = (raw) => {
+  const hydrated = {};
+  PERIODS.forEach(p => {
+    hydrated[p] = (raw[p] || []).map(s => ({
+      ...s,
+      history: s.history || [],
+      totalPoints: (s.history || []).reduce((sum, d) => sum + (d.points || 0), 0),
+    }));
+    savePeriodDataLocal(p, hydrated[p]);
+  });
+  return hydrated;
+};
+
+// ─── DAY ROLLOVER ─────────────────────────────────────────────────────────────
 const performDayRollover = (allPeriodData, dateLabel) => {
   const newData = {};
   PERIODS.forEach(p => {
@@ -168,7 +213,7 @@ const performDayRollover = (allPeriodData, dateLabel) => {
       if (!hasActivity) return { ...s, points: 0, log: [], attendance: "absent" };
       const dayRecord = { date: dateLabel, points: s.points, log: s.log, attendance: s.attendance };
       const newHistory = [dayRecord, ...(s.history || [])];
-      const newTotal = newHistory.reduce((sum, day) => sum + (day.points || 0), 0);
+      const newTotal = newHistory.reduce((sum, d) => sum + (d.points || 0), 0);
       return { ...s, points: 0, log: [], attendance: "absent", history: newHistory, totalPoints: newTotal };
     });
     savePeriodDataLocal(p, newData[p]);
@@ -176,78 +221,62 @@ const performDayRollover = (allPeriodData, dateLabel) => {
   return newData;
 };
 
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function getAttendanceMeta(att) {
-  if (att === "present") return { icon: "✅", label: "Present", color: "#4C9B82", bg: "#E8F5F0", border: "#4C9B82" };
-  if (att === "absent")  return { icon: "❌", label: "Absent",  color: "#E05C5C", bg: "#FFF1F1", border: "#E05C5C" };
-  return { icon: "○", label: "Mark", color: "#bbb", bg: "#F5F5F5", border: "#ddd" };
+  if (att === "present") return { icon:"✅", label:"Present", color:"#4C9B82", bg:"#E8F5F0", border:"#4C9B82" };
+  if (att === "absent")  return { icon:"❌", label:"Absent",  color:"#E05C5C", bg:"#FFF1F1", border:"#E05C5C" };
+  return { icon:"○", label:"Mark", color:"#bbb", bg:"#F5F5F5", border:"#ddd" };
 }
-
-function getBadge(pts) {
-  if (pts >= 5) return "⭐";
-  if (pts >= 3) return "🌟";
-  if (pts < 0)  return "⚠️";
-  return null;
-}
+function getBadge(pts)      { return pts >= 5 ? "⭐" : pts >= 3 ? "🌟" : pts < 0 ? "⚠️" : null; }
 function getPointColor(pts) { return pts > 0 ? "#2E7D5E" : pts < 0 ? "#C0392B" : "#888"; }
-function getCardBg(pts) { return pts >= 5 ? "#FFF8E7" : pts < 0 ? "#FFF1F1" : "#FFFFFF"; }
+function getCardBg(pts)     { return pts >= 5 ? "#FFF8E7" : pts < 0 ? "#FFF1F1" : "#FFFFFF"; }
 
-// ─── REPORT PRINT HTML ──────────────────────────────────────────────────────
+// ─── PRINT HTML BUILDER ───────────────────────────────────────────────────────
 function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, className, dateLabel, singleStudent) {
   const periodsData = selectedPeriod === "ALL" ? PERIODS : [selectedPeriod];
-  const studentRows = periodsData.flatMap(function(period) {
+  const studentRows = periodsData.flatMap(period => {
     const pStudents = allPeriodData[period] || [];
     const pc = PERIOD_COLORS[period];
     const targets = singleStudent
-      ? pStudents.filter(function(s) { return s.name === singleStudent.name && period === singleStudent.period; })
+      ? pStudents.filter(s => s.name === singleStudent.name && period === singleStudent.period)
       : pStudents;
-    return targets.map(function(s) { return { s, period, pc }; });
+    return targets.map(s => ({ s, period, pc }));
   });
 
-  const cards = studentRows.map(function(row) {
-    const s = row.s, period = row.period, pc = row.pc;
+  const cards = studentRows.map(({ s, period, pc }) => {
     const att = getAttendanceMeta(s.attendance);
     const initials = s.name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
     const ptColor = s.points > 0 ? "#2E7D5E" : s.points < 0 ? "#C0392B" : "#888";
     const ptStr = (s.points > 0 ? "+" : "") + s.points;
     const totalPts = (s.totalPoints || 0) + s.points;
 
-    // Category icons (same for both modes)
     const catIcons = CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
       const count = s.log.filter(l => l.label === cat.label).length;
       return `<div style="background:${cat.color}18;border:1px solid ${cat.color}40;border-radius:20px;padding:3px 10px;font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:2px">${cat.emoji}${count > 1 ? `<span style="font-size:10px;font-weight:700;color:${cat.color}">×${count}</span>` : ""}</div>`;
     }).join("");
 
-    // Today's activity log
     const todayLog = reportMode === "full" && s.log.length > 0
-      ? `<div style="border-top:1px solid #F0F2F6;padding-top:8px;margin-top:6px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Activity Log</div>${s.log.map(e => {
-          const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B";
-          return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px;border-bottom:1px solid #f5f5f5"><span>${e.emoji}</span><span style="flex:1;color:#555">${e.label}</span><span style="color:${ec};font-weight:700">${e.pts > 0 ? "+" : ""}${e.pts}</span><span style="color:#bbb;font-size:10px;min-width:40px;text-align:right">${e.time}</span></div>`;
-        }).join("")}</div>` : "";
+      ? `<div style="border-top:1px solid #F0F2F6;padding-top:8px;margin-top:6px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Activity Log</div>${s.log.map(e => { const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B"; return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px;border-bottom:1px solid #f5f5f5"><span>${e.emoji}</span><span style="flex:1;color:#555">${e.label}</span><span style="color:${ec};font-weight:700">${e.pts > 0 ? "+" : ""}${e.pts}</span><span style="color:#bbb;font-size:10px;min-width:40px;text-align:right">${e.time}</span></div>`; }).join("")}</div>` : "";
 
-    // History
     const histDisplayed = reportMode === "full" ? (s.history || []) : (s.history || []).slice(0, 3);
-    const historyRows = histDisplayed.map(function(day) {
+    const historyRows = histDisplayed.map(day => {
       const dayPtColor = day.points > 0 ? "#2E7D5E" : day.points < 0 ? "#C0392B" : "#888";
       const dayPts = (day.points > 0 ? "+" : "") + day.points;
       const attendedCats = CATEGORIES.filter(c => (day.log||[]).some(l => l.label === c.label));
       if (reportMode === "full") {
-        const dayLogRows = (day.log||[]).map(e => {
-          const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B";
-          return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px"><span>${e.emoji}</span><span style="flex:1;color:#555">${e.label}</span><span style="color:${ec};font-weight:700">${e.pts > 0 ? "+" : ""}${e.pts}</span><span style="color:#bbb;font-size:10px;min-width:40px;text-align:right">${e.time}</span></div>`;
-        }).join("");
+        const dayLogRows = (day.log||[]).map(e => { const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B"; return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px"><span>${e.emoji}</span><span style="flex:1;color:#555">${e.label}</span><span style="color:${ec};font-weight:700">${e.pts > 0 ? "+" : ""}${e.pts}</span><span style="color:#bbb;font-size:10px;min-width:40px;text-align:right">${e.time}</span></div>`; }).join("");
         return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:700;font-size:11px;color:#333">${day.date}</span><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:${day.attendance==="present"?"#4C9B82":"#E05C5C"};font-weight:600">${day.attendance==="present"?"Present":"Absent"}</span><span style="font-weight:700;color:${dayPtColor};font-size:12px">${dayPts} pts</span></div></div><div style="border-left:2px solid #E8EBF0;padding-left:8px">${dayLogRows||`<div style="font-size:11px;color:#bbb">No activity recorded</div>`}</div></div>`;
       } else {
-        const dayCats = attendedCats.map(c=>c.emoji).join(" ");
+        const dayCats = attendedCats.map(c => c.emoji).join(" ");
         return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f0;font-size:11px"><span style="color:#999;min-width:68px;font-size:10px;flex-shrink:0">${day.date}</span><span style="font-size:12px">${day.attendance==="present"?"✅":"❌"}</span><span style="flex:1;color:#888;font-size:12px;letter-spacing:2px">${dayCats||"—"}</span><span style="font-weight:700;color:${dayPtColor};min-width:28px;text-align:right">${dayPts}</span></div>`;
       }
     }).join("");
 
-    const histLabel = reportMode==="full" ? `History (${(s.history||[]).length} days)` : `Recent History (last ${histDisplayed.length} of ${(s.history||[]).length} days)`;
-    const cumTotal = reportMode==="full" && (s.history||[]).length > 0
+    const histLabel = reportMode === "full" ? `History (${(s.history||[]).length} days)` : `Recent History (last ${histDisplayed.length} of ${(s.history||[]).length} days)`;
+    const cumTotal = reportMode === "full" && (s.history||[]).length > 0
       ? `<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-size:12px;font-weight:700;border-top:1px solid #E8EBF0;margin-top:4px"><span style="color:#555">Cumulative total (${(s.history||[]).length} days)</span><span style="color:#9B6DD1">${totalPts} pts</span></div>` : "";
     const historySection = (s.history||[]).length > 0
       ? `<div style="border-top:2px solid #E8EBF0;margin-top:10px;padding-top:8px"><div style="font-size:10px;font-weight:700;color:#9B6DD1;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">📅 ${histLabel}</div>${historyRows}${cumTotal}</div>` : "";
-
     const noteHTML = s.parentNote ? `<div style="background:#FFFBEA;border:1px solid #FFD166;border-radius:6px;padding:6px 10px;font-size:11px;color:#7A5200;margin-top:8px"><b>Note:</b> ${s.parentNote}</div>` : "";
     const noActivity = s.log.length === 0 ? `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px">No activity today</div>` : "";
 
@@ -257,17 +286,13 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
   return `<h1 style="font-size:20px;font-weight:800;margin:0 0 4px">${className} — Participation Reports</h1><div style="font-size:13px;color:#888;margin-bottom:20px">${teacherName} · ${dateLabel}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">${cards}</div>`;
 }
 
-// ─── IMPORT ROSTER MODAL ────────────────────────────────────────────────────
+// ─── IMPORT ROSTER MODAL ──────────────────────────────────────────────────────
 function ImportRosterModal({ onClose, onImport }) {
   const [activePeriod, setActivePeriod] = useState("P1");
   const [rosterText, setRosterText] = useState({ P1:"", P2:"", P3:"", P4:"", P5:"" });
   const [preview, setPreview] = useState({ P1:[], P2:[], P3:[], P4:[], P5:[] });
 
-  const parseNames = (text) => {
-    return text.split(/[\n\r]+/)
-      .map(n => n.trim())
-      .filter(n => n.length > 0 && n.length < 60);
-  };
+  const parseNames = text => text.split(/[\n\r]+/).map(n => n.trim()).filter(n => n.length > 0 && n.length < 60);
 
   const handlePaste = (period, text) => {
     setRosterText(prev => ({ ...prev, [period]: text }));
@@ -280,8 +305,7 @@ function ImportRosterModal({ onClose, onImport }) {
     const result = {};
     PERIODS.forEach(p => {
       result[p] = preview[p].map(name => ({
-        name, points: 0, log: [], attendance: "absent",
-        notes: "", parentNote: "", history: [], totalPoints: 0
+        name, points: 0, log: [], attendance: "absent", notes: "", parentNote: "", history: [], totalPoints: 0
       }));
     });
     onImport(result);
@@ -291,76 +315,48 @@ function ImportRosterModal({ onClose, onImport }) {
   return (
     <div style={{ position:"fixed", inset:0, zIndex:3000, background:"rgba(0,0,0,0.65)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
       <div style={{ background:"white", borderRadius:16, width:"100%", maxWidth:560, maxHeight:"90vh", overflow:"hidden", display:"flex", flexDirection:"column", boxShadow:"0 24px 64px rgba(0,0,0,0.3)" }}>
-        
-        {/* Header */}
         <div style={{ background:"linear-gradient(135deg,#1A1A2E,#16213E)", color:"white", padding:"18px 22px", flexShrink:0 }}>
           <div style={{ fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#7EC8A4", fontWeight:600, marginBottom:4 }}>Setup</div>
           <div style={{ fontSize:18, fontWeight:700 }}>Import Class Roster</div>
-          <div style={{ fontSize:12, color:"rgba(255,255,255,0.5)", marginTop:4 }}>
-            Paste names from Google Sheets — one name per row, or comma-separated
-          </div>
+          <div style={{ fontSize:12, color:"rgba(255,255,255,0.5)", marginTop:4 }}>Paste names from Google Sheets — one name per row</div>
         </div>
-
-        {/* Period tabs */}
         <div style={{ display:"flex", borderBottom:"2px solid #E8EBF0", flexShrink:0, overflowX:"auto" }}>
           {PERIODS.map(p => {
-            const pc = PERIOD_COLORS[p];
-            const count = preview[p].length;
-            const isActive = p === activePeriod;
+            const pc = PERIOD_COLORS[p]; const count = preview[p].length; const isActive = p === activePeriod;
             return (
               <button key={p} onClick={() => setActivePeriod(p)}
-                style={{ flex:1, padding:"10px 8px", border:"none", borderBottom: isActive ? `3px solid ${pc.accent}` : "3px solid transparent", background: isActive ? pc.bg : "white", cursor:"pointer", fontSize:12, fontWeight:isActive?700:500, color: isActive ? pc.text : "#999", minWidth:70, transition:"all 0.15s" }}>
+                style={{ flex:1, padding:"10px 8px", border:"none", borderBottom: isActive ? `3px solid ${pc.accent}` : "3px solid transparent", background: isActive ? pc.bg : "white", cursor:"pointer", fontSize:12, fontWeight:isActive?700:500, color: isActive ? pc.text : "#999", minWidth:70 }}>
                 <div style={{ fontWeight:800 }}>{p}</div>
-                <div style={{ fontSize:10, color: count > 0 ? pc.accent : "#ccc", marginTop:2 }}>
-                  {count > 0 ? `${count} students` : "empty"}
-                </div>
+                <div style={{ fontSize:10, color: count > 0 ? pc.accent : "#ccc", marginTop:2 }}>{count > 0 ? `${count} students` : "empty"}</div>
               </button>
             );
           })}
         </div>
-
-        {/* Content */}
         <div style={{ padding:20, flex:1, overflowY:"auto" }}>
-          <div style={{ marginBottom:10, fontSize:13, color:"#555", fontWeight:600 }}>
-            {activePeriod} — Paste your roster below
-          </div>
+          <div style={{ marginBottom:10, fontSize:13, color:"#555", fontWeight:600 }}>{activePeriod} — Paste your roster below</div>
           <div style={{ fontSize:12, color:"#999", marginBottom:10, background:"#F8F9FC", borderRadius:8, padding:"8px 12px", lineHeight:1.6 }}>
             💡 In Google Sheets: select the column of names → Ctrl+C → paste here
           </div>
-          <textarea
-            value={rosterText[activePeriod]}
-            onChange={e => handlePaste(activePeriod, e.target.value)}
-            placeholder={"Aaliyah Johnson\nBrandon Lee\nCeleste Rivera\n..."}
-            rows={8}
-            style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", lineHeight:1.6 }}
-          />
-
-          {/* Preview */}
+          <textarea value={rosterText[activePeriod]} onChange={e => handlePaste(activePeriod, e.target.value)}
+            placeholder={"Aaliyah Johnson\nBrandon Lee\nCeleste Rivera\n..."} rows={8}
+            style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", lineHeight:1.6 }} />
           {preview[activePeriod].length > 0 && (
             <div style={{ marginTop:12 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:"#4C9B82", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>
-                ✅ {preview[activePeriod].length} students detected
-              </div>
+              <div style={{ fontSize:11, fontWeight:700, color:"#4C9B82", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>✅ {preview[activePeriod].length} students detected</div>
               <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                 {preview[activePeriod].map((name, i) => (
-                  <div key={i} style={{ background:PERIOD_COLORS[activePeriod].bg, color:PERIOD_COLORS[activePeriod].text, border:`1px solid ${PERIOD_COLORS[activePeriod].accent}40`, borderRadius:20, padding:"3px 12px", fontSize:12, fontWeight:600 }}>
-                    {name}
-                  </div>
+                  <div key={i} style={{ background:PERIOD_COLORS[activePeriod].bg, color:PERIOD_COLORS[activePeriod].text, border:`1px solid ${PERIOD_COLORS[activePeriod].accent}40`, borderRadius:20, padding:"3px 12px", fontSize:12, fontWeight:600 }}>{name}</div>
                 ))}
               </div>
             </div>
           )}
         </div>
-
-        {/* Footer */}
         <div style={{ padding:"14px 20px", borderTop:"1px solid #E8EBF0", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, background:"#F8F9FC" }}>
           <div style={{ fontSize:12, color:"#888" }}>
-            {totalNames > 0 ? <span style={{ color:"#4C9B82", fontWeight:700 }}>✅ {totalNames} students total across all periods</span> : "No names added yet"}
+            {totalNames > 0 ? <span style={{ color:"#4C9B82", fontWeight:700 }}>✅ {totalNames} students total</span> : "No names added yet"}
           </div>
           <div style={{ display:"flex", gap:8 }}>
-            <button onClick={onClose} style={{ background:"none", border:"2px solid #E0E4EC", borderRadius:9, padding:"8px 18px", fontSize:13, cursor:"pointer", color:"#666" }}>
-              Cancel
-            </button>
+            <button onClick={onClose} style={{ background:"none", border:"2px solid #E0E4EC", borderRadius:9, padding:"8px 18px", fontSize:13, cursor:"pointer", color:"#666" }}>Cancel</button>
             <button onClick={handleImport} disabled={totalNames === 0}
               style={{ background: totalNames > 0 ? "#4C9B82" : "#ccc", color:"white", border:"none", borderRadius:9, padding:"8px 22px", fontSize:13, fontWeight:700, cursor: totalNames > 0 ? "pointer" : "default" }}>
               Import {totalNames > 0 ? `${totalNames} Students` : ""}
@@ -372,7 +368,7 @@ function ImportRosterModal({ onClose, onImport }) {
   );
 }
 
-// ─── PARENT REPORT MODAL ────────────────────────────────────────────────────
+// ─── PARENT REPORT MODAL ──────────────────────────────────────────────────────
 function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   const [selectedPeriod, setSelectedPeriod] = useState("ALL");
   const [reportMode, setReportMode] = useState("summary");
@@ -380,14 +376,6 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   const [teacherName, setTeacherName] = useState("Ms. Lin");
   const [className, setClassName] = useState("Algebra 2");
   const periodsToShow = selectedPeriod === "ALL" ? PERIODS : [selectedPeriod];
-
-  const getStarMessage = (s) => {
-    if (s.points >= 5) return `Outstanding participation this period! ${s.name} has been an excellent contributor to class discussions.`;
-    if (s.points >= 3) return `${s.name} showed strong engagement and made meaningful contributions to class.`;
-    if (s.points >= 1) return "";
-    if (s.points === 0) return `${s.name} attended class. Encouraging more participation would be beneficial.`;
-    return `${s.name} had some challenges with class participation.`;
-  };
 
   return (
     <div style={{ position:"fixed", inset:0, zIndex:2000, overflowY:"auto", background:"rgba(0,0,0,0.6)" }} onClick={onClose}>
@@ -438,8 +426,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
           {periodsToShow.map(period => {
             const students = allPeriodData[period] || [];
             const pc = PERIOD_COLORS[period];
-            const activeStudents = students.filter(s => s.log.length > 0 || s.attendance === "present");
-            if (activeStudents.length === 0) {
+            if (students.filter(s => s.log.length > 0 || s.attendance === "present").length === 0) {
               return (
                 <div key={period} style={{ marginBottom:24, padding:20, border:"2px dashed #E0E4EC", borderRadius:12, textAlign:"center", color:"#aaa" }}>
                   <div style={{ fontSize:16, fontWeight:700, color:"#999" }}>{period} — No data recorded yet</div>
@@ -479,41 +466,27 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                             <div style={{ fontSize:12, color:"#bbb", textAlign:"center", padding:"8px 0" }}>No activity recorded</div>
                           ) : (
                             <>
-                              {reportMode === "summary" ? (
-                                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
-                                  {CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
-                                    const count = s.log.filter(l => l.label === cat.label).length;
-                                    return (
-                                      <div key={cat.id} style={{ background:cat.color + "18", border:`1px solid ${cat.color}40`, borderRadius:20, padding:"3px 10px", fontSize:13, display:"flex", alignItems:"center", gap:4 }}>
-                                        <span>{cat.emoji}</span>
-                                        {count > 1 && <span style={{ fontSize:10, fontWeight:700, color:cat.color }}>×{count}</span>}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
-                                  {CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
-                                    const count = s.log.filter(l => l.label === cat.label).length;
-                                    return (
-                                      <div key={cat.id} style={{ background:cat.color + "18", border:`1px solid ${cat.color}40`, borderRadius:20, padding:"3px 10px", fontSize:13, display:"flex", alignItems:"center", gap:4 }}>
-                                        <span>{cat.emoji}</span>
-                                        {count > 1 && <span style={{ fontSize:10, fontWeight:700, color:cat.color }}>×{count}</span>}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                                {CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
+                                  const count = s.log.filter(l => l.label === cat.label).length;
+                                  return (
+                                    <div key={cat.id} style={{ background:cat.color+"18", border:`1px solid ${cat.color}40`, borderRadius:20, padding:"3px 10px", fontSize:13, display:"flex", alignItems:"center", gap:4 }}>
+                                      <span>{cat.emoji}</span>
+                                      {count > 1 && <span style={{ fontSize:10, fontWeight:700, color:cat.color }}>×{count}</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
                               {reportMode === "full" && s.log.length > 0 && (
                                 <div style={{ borderTop:"1px solid #F0F2F6", paddingTop:8, marginTop:6 }}>
                                   <div style={{ fontSize:10, fontWeight:700, color:"#aaa", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Activity Log</div>
-                                  {s.log.slice(0, 8).map((entry, ei) => {
-                                    const entryColor = entry.pts > 0 ? "#2E7D5E" : "#C0392B";
+                                  {s.log.slice(0,8).map((entry, ei) => {
+                                    const ec = entry.pts > 0 ? "#2E7D5E" : "#C0392B";
                                     return (
                                       <div key={ei} style={{ display:"flex", alignItems:"center", gap:6, padding:"3px 0", fontSize:11, borderBottom:"1px solid #f5f5f5" }}>
                                         <span>{entry.emoji}</span>
                                         <span style={{ flex:1, color:"#555" }}>{entry.label}</span>
-                                        <span style={{ color:entryColor, fontWeight:700 }}>{entry.pts > 0 ? "+" : ""}{entry.pts}</span>
+                                        <span style={{ color:ec, fontWeight:700 }}>{entry.pts > 0 ? "+" : ""}{entry.pts}</span>
                                         <span style={{ color:"#bbb", fontSize:10 }}>{entry.time}</span>
                                       </div>
                                     );
@@ -528,9 +501,7 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                             </div>
                           )}
                           {(s.history||[]).length > 0 && (() => {
-                            const hist = s.history;
-                            const showAll = reportMode === "full";
-                            const displayed = showAll ? hist : hist.slice(0, 3);
+                            const hist = s.history; const showAll = reportMode === "full"; const displayed = showAll ? hist : hist.slice(0,3);
                             return (
                               <div style={{ borderTop:"2px solid #E8EBF0", marginTop:10, paddingTop:8 }}>
                                 <div style={{ fontSize:10, fontWeight:700, color:"#9B6DD1", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>📅 History ({hist.length} days)</div>
@@ -544,47 +515,23 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
                                           <span style={{ fontWeight:700, fontSize:11, color:"#333" }}>{day.date}</span>
                                           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                                            <span style={{ fontSize:11, color: day.attendance === "present" ? "#4C9B82" : "#E05C5C", fontWeight:600 }}>{day.attendance === "present" ? "Present" : "Absent"}</span>
+                                            <span style={{ fontSize:11, color: day.attendance==="present" ? "#4C9B82" : "#E05C5C", fontWeight:600 }}>{day.attendance==="present" ? "Present" : "Absent"}</span>
                                             <span style={{ fontWeight:700, color:dayPtColor, fontSize:12 }}>{dayPts} pts</span>
                                           </div>
                                         </div>
                                         {(day.log||[]).length > 0 ? (
                                           <div style={{ borderLeft:"2px solid #E8EBF0", paddingLeft:8, marginTop:2 }}>
-                                            {(day.log||[]).map((entry, ei) => {
-                                              const ec = entry.pts > 0 ? "#2E7D5E" : "#C0392B";
-                                              return (
-                                                <div key={ei} style={{ display:"flex", alignItems:"center", gap:6, padding:"2px 0", fontSize:11 }}>
-                                                  <span>{entry.emoji}</span>
-                                                  <span style={{ flex:1, color:"#555" }}>{entry.label}</span>
-                                                  <span style={{ color:ec, fontWeight:700 }}>{entry.pts > 0 ? "+" : ""}{entry.pts}</span>
-                                                  <span style={{ color:"#bbb", fontSize:10, minWidth:36, textAlign:"right" }}>{entry.time}</span>
-                                                </div>
-                                              );
-                                            })}
+                                            {(day.log||[]).map((entry, ei) => { const ec = entry.pts > 0 ? "#2E7D5E" : "#C0392B"; return (<div key={ei} style={{ display:"flex", alignItems:"center", gap:6, padding:"2px 0", fontSize:11 }}><span>{entry.emoji}</span><span style={{ flex:1, color:"#555" }}>{entry.label}</span><span style={{ color:ec, fontWeight:700 }}>{entry.pts > 0 ? "+" : ""}{entry.pts}</span><span style={{ color:"#bbb", fontSize:10, minWidth:36, textAlign:"right" }}>{entry.time}</span></div>); })}
                                           </div>
-                                        ) : (
-                                          <div style={{ fontSize:11, color:"#bbb", paddingLeft:8 }}>No activity recorded</div>
-                                        )}
+                                        ) : (<div style={{ fontSize:11, color:"#bbb", paddingLeft:8 }}>No activity recorded</div>)}
                                       </div>
                                     );
                                   } else {
                                     const dayCats = attendedCats.map(c => c.emoji).join(" ");
-                                    return (
-                                      <div key={di} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0", borderBottom:"1px solid #f5f5f5", fontSize:11 }}>
-                                        <span style={{ color:"#999", minWidth:68, fontSize:10, flexShrink:0 }}>{day.date}</span>
-                                        <span style={{ fontSize:12 }}>{day.attendance === "present" ? "✅" : "❌"}</span>
-                                        <span style={{ flex:1, color:"#888", fontSize:12, letterSpacing:2 }}>{dayCats || "—"}</span>
-                                        <span style={{ fontWeight:700, color:dayPtColor, minWidth:28, textAlign:"right" }}>{dayPts}</span>
-                                      </div>
-                                    );
+                                    return (<div key={di} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0", borderBottom:"1px solid #f5f5f5", fontSize:11 }}><span style={{ color:"#999", minWidth:68, fontSize:10, flexShrink:0 }}>{day.date}</span><span style={{ fontSize:12 }}>{day.attendance==="present" ? "✅" : "❌"}</span><span style={{ flex:1, color:"#888", fontSize:12, letterSpacing:2 }}>{dayCats||"—"}</span><span style={{ fontWeight:700, color:dayPtColor, minWidth:28, textAlign:"right" }}>{dayPts}</span></div>);
                                   }
                                 })}
-                                {showAll && (
-                                  <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", fontSize:12, fontWeight:700, borderTop:"1px solid #E8EBF0", marginTop:4 }}>
-                                    <span style={{ color:"#555" }}>Cumulative total ({hist.length} days)</span>
-                                    <span style={{ color:"#9B6DD1" }}>{(s.totalPoints||0) + s.points} pts</span>
-                                  </div>
-                                )}
+                                {showAll && (<div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", fontSize:12, fontWeight:700, borderTop:"1px solid #E8EBF0", marginTop:4 }}><span style={{ color:"#555" }}>Cumulative total ({hist.length} days)</span><span style={{ color:"#9B6DD1" }}>{(s.totalPoints||0) + s.points} pts</span></div>)}
                               </div>
                             );
                           })()}
@@ -610,77 +557,92 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
   );
 }
 
-// ─── LOGIN SCREEN ───────────────────────────────────────────────────────────
+// ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    if (!email || !password) { setError("Please enter email and password."); return; }
-    setLoading(true); setError("");
-    const result = await supabaseSignIn(email, password);
-    setLoading(false);
-    if (result.error) { setError(result.error); return; }
-    onLogin(result.token);
+  const handleSignIn = () => {
+    setLoading(true);
+    const nonce = Math.random().toString(36).slice(2);
+    sessionStorage.setItem(OAUTH_NONCE_KEY, nonce);
+    window.location.href = buildAuthUrl(nonce);
   };
 
   return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#1A1A2E 0%,#16213E 100%)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
-      <div style={{ background:"white", borderRadius:20, padding:36, maxWidth:380, width:"100%", boxShadow:"0 24px 64px rgba(0,0,0,0.4)" }}>
-        <div style={{ textAlign:"center", marginBottom:28 }}>
-          <div style={{ fontSize:36, marginBottom:12 }}>📋</div>
-          <div style={{ fontSize:22, fontWeight:800, color:"#1A1A2E", marginBottom:6 }}>Participation Tracker</div>
-          <div style={{ fontSize:13, color:"#888" }}>Sign in to access your class data</div>
-        </div>
-        <div style={{ marginBottom:14 }}>
-          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:5 }}>EMAIL</label>
-          <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()}
-            type="email" placeholder="your@email.com"
-            style={{ width:"100%", padding:"11px 14px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:14, outline:"none", fontFamily:"inherit" }} />
-        </div>
-        <div style={{ marginBottom:20 }}>
-          <label style={{ fontSize:11, fontWeight:700, color:"#666", display:"block", marginBottom:5 }}>PASSWORD</label>
-          <input value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()}
-            type="password" placeholder="••••••••"
-            style={{ width:"100%", padding:"11px 14px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:14, outline:"none", fontFamily:"inherit" }} />
-        </div>
-        {error && <div style={{ background:"#FFF1F1", border:"1px solid #E05C5C40", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#C0392B", marginBottom:14 }}>⚠️ {error}</div>}
-        <button onClick={handleLogin} disabled={loading}
-          style={{ width:"100%", background: loading ? "#aaa" : "#1A1A2E", color:"white", border:"none", borderRadius:10, padding:"13px", fontSize:15, fontWeight:700, cursor: loading ? "default" : "pointer" }}>
-          {loading ? "Signing in…" : "Sign In"}
+      <div style={{ background:"white", borderRadius:20, padding:40, maxWidth:380, width:"100%", boxShadow:"0 24px 64px rgba(0,0,0,0.4)", textAlign:"center" }}>
+        <div style={{ fontSize:44, marginBottom:16 }}>📋</div>
+        <div style={{ fontSize:22, fontWeight:800, color:"#1A1A2E", marginBottom:8 }}>Participation Tracker</div>
+        <div style={{ fontSize:13, color:"#888", marginBottom:28, lineHeight:1.6 }}>Sign in with Google to sync your class data across all devices via Google Drive.</div>
+        <button onClick={handleSignIn} disabled={loading}
+          style={{ width:"100%", background: loading ? "#aaa" : "#1A1A2E", color:"white", border:"none", borderRadius:12, padding:"14px 20px", fontSize:15, fontWeight:700, cursor: loading ? "default" : "pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg>
+          {loading ? "Redirecting…" : "Sign in with Google"}
         </button>
-        <div style={{ textAlign:"center", fontSize:11, color:"#bbb", marginTop:16 }}>🔒 Protected — authorized users only</div>
+        <div style={{ fontSize:11, color:"#bbb", marginTop:18, lineHeight:1.6 }}>
+          Data is stored privately in your Google Drive's app folder. Only this app can access it.
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── ROOT WITH AUTH ──────────────────────────────────────────────────────────
+// ─── ROOT WITH AUTH ────────────────────────────────────────────────────────────
 function Root() {
-  const [authToken, setAuthToken] = useState(() => sessionStorage.getItem("pt_token") || null);
+  const [authToken, setAuthToken] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
 
-  const handleLogin = (token) => {
-    sessionStorage.setItem("pt_token", token);
-    setAuthToken(token);
-  };
+  useEffect(() => {
+    // Check if returning from OAuth redirect
+    const tokenFromHash = parseHashToken();
+    if (tokenFromHash) {
+      const expectedNonce = sessionStorage.getItem(OAUTH_NONCE_KEY);
+      sessionStorage.removeItem(OAUTH_NONCE_KEY);
+      if (tokenFromHash.state === expectedNonce) {
+        const expiry = Date.now() + tokenFromHash.expiresIn * 1000;
+        sessionStorage.setItem(TOKEN_KEY, tokenFromHash.token);
+        sessionStorage.setItem(TOKEN_EXP_KEY, expiry.toString());
+        setAuthToken(tokenFromHash.token);
+        setAuthReady(true);
+        return;
+      }
+    }
+    // Check for stored token
+    const storedToken = sessionStorage.getItem(TOKEN_KEY);
+    const storedExp = parseInt(sessionStorage.getItem(TOKEN_EXP_KEY) || "0", 10);
+    if (storedToken && storedExp > Date.now() + 60000) {
+      setAuthToken(storedToken);
+    }
+    setAuthReady(true);
+  }, []);
 
   const handleLogout = async () => {
-    await supabaseSignOut(authToken);
-    sessionStorage.removeItem("pt_token");
+    const token = sessionStorage.getItem(TOKEN_KEY);
+    if (token) await driveRevokeToken(token);
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_EXP_KEY);
+    sessionStorage.removeItem(FILE_ID_KEY);
     setAuthToken(null);
   };
 
-  if (!authToken) return <LoginScreen onLogin={handleLogin} />;
+  if (!authReady) {
+    return (
+      <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#1A1A2E,#16213E)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ color:"white", fontSize:15, opacity:0.6 }}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (!authToken) return <LoginScreen />;
   return <App authToken={authToken} onLogout={handleLogout} />;
 }
 
-// ─── MAIN APP ───────────────────────────────────────────────────────────────
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function App({ authToken, onLogout }) {
   const [activePeriod, setActivePeriod] = useState("P1");
   const [allPeriodData, setAllPeriodData] = useState(buildDefaultAllData);
-  const [cloudStatus, setCloudStatus] = useState("loading"); // loading | synced | saving | error | offline
+  const [cloudStatus, setCloudStatus] = useState("loading"); // loading | synced | saving | error
+  const [driveFileId, setDriveFileId] = useState(() => sessionStorage.getItem(FILE_ID_KEY) || null);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
   const [popoverPos, setPopoverPos] = useState(null);
@@ -698,53 +660,48 @@ function App({ authToken, onLogout }) {
   const [showEndDayConfirm, setShowEndDayConfirm] = useState(false);
   const [showRosterImport, setShowRosterImport] = useState(false);
   const [showSemesterReset, setShowSemesterReset] = useState(false);
-  const [sortBy, setSortBy] = useState("roster"); // roster | first | last
+  const [sortBy, setSortBy] = useState("roster");
   const saveTimerRef = useRef(null);
   const isFirstLoad = useRef(true);
+  const driveFileIdRef = useRef(driveFileId);
+
+  useEffect(() => { driveFileIdRef.current = driveFileId; }, [driveFileId]);
 
   const students = allPeriodData[activePeriod] || [];
   const pc = PERIOD_COLORS[activePeriod];
 
-  // ── LOAD FROM SUPABASE ON MOUNT ───────────────────────────────────────────
+  // ── LOAD FROM DRIVE ON MOUNT ──────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       setCloudStatus("loading");
-      const cloudData = await supabaseGet(authToken);
-      if (cloudData && Object.keys(cloudData).length > 0) {
-        // Hydrate totalPoints
-        const hydrated = {};
-        PERIODS.forEach(p => {
-          hydrated[p] = (cloudData[p] || []).map(s => ({
-            ...s,
-            history: s.history || [],
-            totalPoints: (s.history || []).reduce((sum, d) => sum + (d.points || 0), 0),
-          }));
-          savePeriodDataLocal(p, hydrated[p]);
-        });
-        // Check rollover after loading cloud data
+      const cloudData = await driveLoad(authToken);
+      if (cloudData && cloudData.periods && Object.keys(cloudData.periods).length > 0) {
+        // Cache the file ID
+        const fileId = await driveGetFileId(authToken);
+        if (fileId) { setDriveFileId(fileId); sessionStorage.setItem(FILE_ID_KEY, fileId); driveFileIdRef.current = fileId; }
+
+        const hydrated = hydrateAllData(cloudData.periods);
+
+        // Rollover check
         const today = getTodayDateStr();
-        const last = getLastActiveDate();
+        const last = cloudData.lastDate || getLastActiveDate();
         if (last && last !== today) {
           const rolled = performDayRollover(hydrated, last);
           setAllPeriodData(rolled);
           setLastActiveDate(today);
           setRolloverToast({ date: last });
           setTimeout(() => setRolloverToast(null), 6000);
-          setCloudStatus("synced");
-          return;
+        } else {
+          if (!last) setLastActiveDate(today);
+          setAllPeriodData(hydrated);
         }
-        if (!last) setLastActiveDate(today);
-        setAllPeriodData(hydrated);
         setCloudStatus("synced");
       } else {
-        // No cloud data — check rollover on local data
+        // No cloud data yet — run rollover on local data, then first save will create the file
         const today = getTodayDateStr();
         const last = getLastActiveDate();
         if (last && last !== today) {
-          setAllPeriodData(prev => {
-            const rolled = performDayRollover(prev, last);
-            return rolled;
-          });
+          setAllPeriodData(prev => { const r = performDayRollover(prev, last); return r; });
           setLastActiveDate(today);
           setRolloverToast({ date: last });
           setTimeout(() => setRolloverToast(null), 6000);
@@ -755,16 +712,28 @@ function App({ authToken, onLogout }) {
     })();
   }, []);
 
-  // ── AUTO-SAVE TO SUPABASE (debounced 1.5s) ───────────────────────────────
+  // ── AUTO-SAVE TO DRIVE (debounced 1.5s) ──────────────────────────────────
   useEffect(() => {
     if (isFirstLoad.current) { isFirstLoad.current = false; return; }
     setCloudStatus("saving");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      const ok = await supabaseSave(allPeriodData, authToken);
-      setCloudStatus(ok === undefined ? "synced" : "error");
-      // Also update last active date
-      setLastActiveDate(getTodayDateStr());
+      // Also save to localStorage as backup
+      PERIODS.forEach(p => savePeriodDataLocal(p, allPeriodData[p] || []));
+      const today = getTodayDateStr();
+      setLastActiveDate(today);
+      const payload = { periods: allPeriodData, lastDate: today, savedAt: new Date().toISOString() };
+      const resultId = await driveSave(authToken, payload, driveFileIdRef.current);
+      if (resultId) {
+        if (!driveFileIdRef.current) {
+          setDriveFileId(resultId);
+          sessionStorage.setItem(FILE_ID_KEY, resultId);
+          driveFileIdRef.current = resultId;
+        }
+        setCloudStatus("synced");
+      } else {
+        setCloudStatus("error");
+      }
     }, 1500);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [allPeriodData]);
@@ -775,10 +744,7 @@ function App({ authToken, onLogout }) {
       const today = getTodayDateStr();
       const last = getLastActiveDate();
       if (last && last !== today) {
-        setAllPeriodData(prev => {
-          const rolled = performDayRollover(prev, last);
-          return rolled;
-        });
+        setAllPeriodData(prev => performDayRollover(prev, last));
         setLastActiveDate(today);
         setRolloverToast({ date: last });
         setTimeout(() => setRolloverToast(null), 6000);
@@ -789,11 +755,7 @@ function App({ authToken, onLogout }) {
 
   // ── CLOSE POPOVER ON OUTSIDE CLICK ───────────────────────────────────────
   useEffect(() => {
-    const handle = (e) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
-        setSelected(null); setPopoverPos(null);
-      }
-    };
+    const handle = e => { if (popoverRef.current && !popoverRef.current.contains(e.target)) { setSelected(null); setPopoverPos(null); } };
     if (selected !== null) document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [selected]);
@@ -802,22 +764,17 @@ function App({ authToken, onLogout }) {
     setAllPeriodData(prev => {
       const current = prev[activePeriod];
       const next = typeof updater === "function" ? updater(current) : updater;
-      const updated = { ...prev, [activePeriod]: next };
-      savePeriodDataLocal(activePeriod, next);
-      return updated;
+      return { ...prev, [activePeriod]: next };
     });
   }, [activePeriod]);
 
-  const snapshot = () => {
-    setHistory(h => [...h.slice(-19), { period: activePeriod, data: JSON.parse(JSON.stringify(allPeriodData)) }]);
-  };
+  const snapshot = () => setHistory(h => [...h.slice(-19), { period: activePeriod, data: JSON.parse(JSON.stringify(allPeriodData)) }]);
 
   const undo = () => {
     if (history.length === 0) return;
     const prev = history[history.length - 1];
     setHistory(h => h.slice(0, -1));
     setAllPeriodData(prev.data);
-    PERIODS.forEach(p => savePeriodDataLocal(p, prev.data[p]));
     setUndoToast(null);
   };
 
@@ -827,16 +784,13 @@ function App({ authToken, onLogout }) {
     setUndoToast({ label, timeout });
   };
 
-  const toggleAttendance = (idx) => {
-    setStudents(prev => prev.map((s, i) => i !== idx ? s : { ...s, attendance: s.attendance === "present" ? "absent" : "present" }));
-  };
+  const toggleAttendance = idx => setStudents(prev => prev.map((s, i) => i !== idx ? s : { ...s, attendance: s.attendance === "present" ? "absent" : "present" }));
 
   const award = (studentIdx, cat) => {
     if (students[studentIdx].attendance !== "present") return;
     snapshot();
     setStudents(prev => prev.map((s, i) => i !== studentIdx ? s : {
-      ...s,
-      points: s.points + cat.points,
+      ...s, points: s.points + cat.points,
       log: [{ label:cat.label, pts:cat.points, emoji:cat.emoji, time:getTimeStr(), date:getShortDateStr() }, ...s.log],
     }));
     showUndoMsg(`${cat.emoji} ${cat.label} → ${students[studentIdx].name}`);
@@ -844,23 +798,21 @@ function App({ authToken, onLogout }) {
 
   const awardAll = (cat) => {
     snapshot();
-    const time = getTimeStr(); const date = getShortDateStr();
-    const batchId = Date.now().toString();
+    const time = getTimeStr(); const date = getShortDateStr(); const batchId = Date.now().toString();
     setStudents(prev => prev.map(s => s.attendance !== "present" ? s : {
-      ...s, points:s.points+cat.points, log:[{label:cat.label,pts:cat.points,emoji:cat.emoji,time,date,batchId},...s.log]
+      ...s, points: s.points + cat.points,
+      log: [{ label:cat.label, pts:cat.points, emoji:cat.emoji, time, date, batchId }, ...s.log]
     }));
     setGiveAllHistory(prev => [...prev, { id: batchId, cat, time }]);
     showUndoMsg(`${cat.emoji} ${cat.label} → All present`);
-    setFlashAll(cat.id);
-    setTimeout(() => setFlashAll(null), 800);
+    setFlashAll(cat.id); setTimeout(() => setFlashAll(null), 800);
   };
 
   const removeLogEntry = (studentIdx, logIdx) => {
     snapshot();
     setStudents(prev => prev.map((s, i) => {
       if (i !== studentIdx) return s;
-      const entry = s.log[logIdx];
-      if (!entry) return s;
+      const entry = s.log[logIdx]; if (!entry) return s;
       return { ...s, points: s.points - entry.pts, log: s.log.filter((_, li) => li !== logIdx) };
     }));
     showUndoMsg(`Removed entry from ${students[studentIdx].name}`);
@@ -870,21 +822,19 @@ function App({ authToken, onLogout }) {
     snapshot();
     setStudents(prev => prev.map((s, i) => {
       if (i !== studentIdx) return s;
-      const entry = s.log.find(l => l.batchId === batchId);
-      if (!entry) return s;
+      const entry = s.log.find(l => l.batchId === batchId); if (!entry) return s;
       return { ...s, points: s.points - entry.pts, log: s.log.filter(l => !(l.batchId === batchId && l === entry)) };
     }));
   };
 
   const addStudent = () => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
+    const trimmed = newName.trim(); if (!trimmed) return;
     snapshot();
     setStudents(prev => [...prev, { name:trimmed, points:0, log:[], attendance:"absent", notes:"", parentNote:"", history:[], totalPoints:0 }]);
     setNewName("");
   };
 
-  const removeStudent = (idx) => {
+  const removeStudent = idx => {
     snapshot();
     setStudents(prev => prev.filter((_,i) => i !== idx));
     if (selected === idx) setSelected(null);
@@ -892,34 +842,27 @@ function App({ authToken, onLogout }) {
 
   const endDay = () => {
     snapshot();
-    const today = getTodayDateStr();
-    const newData = performDayRollover(allPeriodData, today);
+    const newData = performDayRollover(allPeriodData, getTodayDateStr());
     setAllPeriodData(newData);
-    setSelected(null);
-    setGiveAllHistory([]);
+    setSelected(null); setGiveAllHistory([]);
     showUndoMsg("Day archived — totals kept, daily points reset");
   };
 
   const resetAll = () => {
     snapshot();
     setStudents(prev => prev.map(s => ({ ...s, points:0, log:[], history:[], totalPoints:0 })));
-    setSelected(null);
-    setGiveAllHistory([]);
+    setSelected(null); setGiveAllHistory([]);
     showUndoMsg("All data cleared");
   };
 
   const masterReset = () => {
     const newData = {};
     PERIODS.forEach(p => {
-      newData[p] = (allPeriodData[p] || []).map(s => ({
-        ...s, points:0, log:[], history:[], totalPoints:0, attendance:"absent", parentNote:"", notes:""
-      }));
+      newData[p] = (allPeriodData[p] || []).map(s => ({ ...s, points:0, log:[], history:[], totalPoints:0, attendance:"absent", parentNote:"", notes:"" }));
       savePeriodDataLocal(p, newData[p]);
     });
     setAllPeriodData(newData);
-    setSelected(null);
-    setGiveAllHistory([]);
-    setShowSemesterReset(false);
+    setSelected(null); setGiveAllHistory([]); setShowSemesterReset(false);
     showUndoMsg("Semester reset — all data cleared, roster kept");
   };
 
@@ -935,8 +878,7 @@ function App({ authToken, onLogout }) {
     PERIODS.forEach(p => {
       const incoming = rosterByPeriod[p] || [];
       if (incoming.length === 0) { newData[p] = allPeriodData[p] || []; return; }
-      newData[p] = incoming;
-      savePeriodDataLocal(p, newData[p]);
+      newData[p] = incoming; savePeriodDataLocal(p, newData[p]);
     });
     setAllPeriodData(newData);
     showUndoMsg("Roster imported — existing students replaced");
@@ -944,74 +886,62 @@ function App({ authToken, onLogout }) {
 
   const exportData = () => {
     const payload = { version: 1, exported: new Date().toISOString(), periods: allPeriodData };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "participation-data-" + new Date().toLocaleDateString("en-US").replace(/\//g,"-") + ".json";
-    a.click();
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = "participation-data-" + new Date().toLocaleDateString("en-US").replace(/\//g,"-") + ".json";
+    a.click(); URL.revokeObjectURL(url);
   };
 
   const importData = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = ev => {
       try {
         const parsed = JSON.parse(ev.target.result);
-        const data = parsed.periods || parsed;
-        snapshot();
+        const data = parsed.periods || parsed; snapshot();
         const newData = {};
-        PERIODS.forEach(p => {
-          if (data[p]) { newData[p] = data[p]; savePeriodDataLocal(p, data[p]); }
-          else { newData[p] = allPeriodData[p]; }
-        });
+        PERIODS.forEach(p => { if (data[p]) { newData[p] = data[p]; savePeriodDataLocal(p, data[p]); } else { newData[p] = allPeriodData[p]; } });
         setAllPeriodData(newData);
         showUndoMsg("Data imported successfully");
       } catch(err) { alert("Could not read file."); }
     };
-    reader.readAsText(file);
-    e.target.value = "";
+    reader.readAsText(file); e.target.value = "";
   };
 
   const periodSummary = PERIODS.map(p => {
     const d = allPeriodData[p] || [];
-    return { p, present: d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0), total_pts:d.reduce((a,s)=>a+(s.totalPoints||0)+s.points,0) };
+    return { p, present:d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0), total_pts:d.reduce((a,s)=>a+(s.totalPoints||0)+s.points,0) };
   });
 
-  const getLastName = (name) => { const parts = name.trim().split(/[, ]+/); return parts[0].toLowerCase(); };
-  const getFirstName = (name) => { const parts = name.trim().split(/[, ]+/); return (parts.length > 1 ? parts[parts.length-1] : parts[0]).toLowerCase(); };
-  const sortStudents = (arr) => {
+  const getLastName  = name => name.trim().split(/[, ]+/)[0].toLowerCase();
+  const getFirstName = name => { const p = name.trim().split(/[, ]+/); return (p.length > 1 ? p[p.length-1] : p[0]).toLowerCase(); };
+  const sortStudents = arr => {
     if (sortBy === "first") return [...arr].sort((a,b) => getFirstName(a.name).localeCompare(getFirstName(b.name)));
     if (sortBy === "last")  return [...arr].sort((a,b) => getLastName(a.name).localeCompare(getLastName(b.name)));
-    return arr; // roster order
+    return arr;
   };
   const displayStudents = sortStudents(students.map((s,i) => ({ ...s, origIdx:i })));
   const sorted = [...displayStudents].sort((a,b) => b.points - a.points);
 
-  // Cloud status display
-  const cloudStatusDisplay = {
-    loading: { label: "Loading from cloud…", color: "#FFD166" },
-    saving:  { label: "Saving to cloud…",    color: "#FFD166" },
-    synced:  { label: "☁️ Synced",            color: "#7EC8A4" },
-    error:   { label: "⚠️ Cloud error — saved locally", color: "#E05C5C" },
-    offline: { label: "Offline — saved locally", color: "#E8934A" },
+  const csDisplay = {
+    loading: { label:"Loading from Drive…",         color:"#FFD166" },
+    saving:  { label:"Saving to Drive…",             color:"#FFD166" },
+    synced:  { label:"☁️ Synced to Google Drive",    color:"#7EC8A4" },
+    error:   { label:"⚠️ Drive error — saved locally", color:"#E05C5C" },
   };
-  const cs = cloudStatusDisplay[cloudStatus] || cloudStatusDisplay.synced;
+  const cs = csDisplay[cloudStatus] || csDisplay.synced;
 
   return (
     <div style={{ fontFamily:"'Segoe UI',system-ui,sans-serif", minHeight:"100vh", background:"#F0F2F6" }}>
 
-      {/* ── TOP HEADER ── */}
+      {/* ── HEADER ── */}
       <div className="no-print" style={{ background:"linear-gradient(135deg,#1A1A2E 0%,#16213E 100%)", color:"white", padding:"16px 20px 0" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:12 }}>
           <div>
             <div style={{ fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#7EC8A4", fontWeight:600 }}>Classroom Tool</div>
             <h1 style={{ margin:0, fontSize:20, fontWeight:700, letterSpacing:-0.5 }}>Participation Tracker</h1>
-            <div style={{ fontSize:10, marginTop:2, color: cs.color, transition:"color 0.3s" }}>
-              {cs.label} · {getTodayDateStr()}
-            </div>
+            <div style={{ fontSize:10, marginTop:2, color:cs.color, transition:"color 0.3s" }}>{cs.label} · {getTodayDateStr()}</div>
           </div>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
             <div style={{ background:"rgba(255,255,255,0.08)", borderRadius:8, padding:"4px 6px", display:"flex", gap:4 }}>
@@ -1021,21 +951,11 @@ function App({ authToken, onLogout }) {
                 </button>
               ))}
             </div>
-            <button onClick={() => setShowRosterImport(true)}
-              style={{ background:"rgba(255,209,102,0.2)", color:"#FFD166", border:"1px solid rgba(255,209,102,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-              👥 Import Roster
-            </button>
-            <button onClick={() => setShowReport(true)}
-              style={{ background:"rgba(76,155,130,0.25)", color:"#7EC8A4", border:"1px solid rgba(76,155,130,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-              📋 Reports
-            </button>
-            <button onClick={exportData}
-              style={{ background:"rgba(91,141,217,0.25)", color:"#8BB4E8", border:"1px solid rgba(91,141,217,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-              💾 Export
-            </button>
+            <button onClick={() => setShowRosterImport(true)} style={{ background:"rgba(255,209,102,0.2)", color:"#FFD166", border:"1px solid rgba(255,209,102,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>👥 Import Roster</button>
+            <button onClick={() => setShowReport(true)} style={{ background:"rgba(76,155,130,0.25)", color:"#7EC8A4", border:"1px solid rgba(76,155,130,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>📋 Reports</button>
+            <button onClick={exportData} style={{ background:"rgba(91,141,217,0.25)", color:"#8BB4E8", border:"1px solid rgba(91,141,217,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>💾 Export</button>
             <label style={{ background:"rgba(155,109,209,0.25)", color:"#C4A0E8", border:"1px solid rgba(155,109,209,0.5)", borderRadius:8, padding:"7px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-              📂 Import
-              <input type="file" accept=".json" onChange={importData} style={{ display:"none" }} />
+              📂 Import<input type="file" accept=".json" onChange={importData} style={{ display:"none" }} />
             </label>
             <button onClick={undo} disabled={history.length===0}
               style={{ background:history.length>0?"rgba(255,209,102,0.2)":"rgba(255,255,255,0.05)", color:history.length>0?"#FFD166":"rgba(255,255,255,0.25)", border:`1px solid ${history.length>0?"#FFD166":"rgba(255,255,255,0.1)"}`, borderRadius:8, padding:"7px 14px", fontSize:13, cursor:history.length>0?"pointer":"default", fontWeight:600 }}>
@@ -1049,28 +969,18 @@ function App({ authToken, onLogout }) {
                 <button onClick={() => setShowEndDayConfirm(false)} style={{ background:"rgba(255,255,255,0.1)", color:"white", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer" }}>Cancel</button>
               </div>
             ) : (
-              <button onClick={() => setShowEndDayConfirm(true)}
-                style={{ background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.55)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer" }}>
-                ↺ Archive Day
-              </button>
+              <button onClick={() => setShowEndDayConfirm(true)} style={{ background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.55)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer" }}>↺ Archive Day</button>
             )}
-            <button onClick={() => setShowSemesterReset(true)}
-              style={{ background:"rgba(255,209,102,0.15)", color:"#FFD166", border:"1px solid rgba(255,209,102,0.4)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer", fontWeight:600 }}>
-              🔄 New Semester
-            </button>
-            <button onClick={onLogout}
-              style={{ background:"rgba(224,92,92,0.2)", color:"#FFB3B3", border:"1px solid rgba(224,92,92,0.4)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer", fontWeight:600 }}>
-              🔒 Sign Out
-            </button>
+            <button onClick={() => setShowSemesterReset(true)} style={{ background:"rgba(255,209,102,0.15)", color:"#FFD166", border:"1px solid rgba(255,209,102,0.4)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer", fontWeight:600 }}>🔄 New Semester</button>
+            <button onClick={onLogout} style={{ background:"rgba(224,92,92,0.2)", color:"#FFB3B3", border:"1px solid rgba(224,92,92,0.4)", borderRadius:8, padding:"7px 14px", fontSize:13, cursor:"pointer", fontWeight:600 }}>🔒 Sign Out</button>
           </div>
         </div>
 
-        {/* ── PERIOD TABS ── */}
+        {/* PERIOD TABS */}
         <div style={{ display:"flex", gap:4, overflowX:"auto" }}>
           {PERIODS.map(p => {
             const ps = periodSummary.find(x => x.p === p);
-            const ppc = PERIOD_COLORS[p];
-            const isActive = p === activePeriod;
+            const ppc = PERIOD_COLORS[p]; const isActive = p === activePeriod;
             return (
               <button key={p} onClick={() => { setActivePeriod(p); setSelected(null); setPopoverPos(null); setGiveAllHistory([]); }}
                 style={{ background: isActive ? "white" : "rgba(255,255,255,0.07)", color: isActive ? ppc.text : "rgba(255,255,255,0.6)", border:"none", borderRadius:"10px 10px 0 0", padding:"10px 16px", fontSize:13, cursor:"pointer", fontWeight:isActive?700:500, position:"relative", transition:"all 0.15s", flexShrink:0, minWidth:80 }}>
@@ -1106,11 +1016,11 @@ function App({ authToken, onLogout }) {
 
       <div style={{ padding:"16px 20px", maxWidth:1100, margin:"0 auto" }}>
 
-        {/* ── LOADING OVERLAY ── */}
+        {/* ── LOADING ── */}
         {cloudStatus === "loading" && (
           <div style={{ textAlign:"center", padding:"40px 20px", color:"#888" }}>
             <div style={{ fontSize:32, marginBottom:12 }}>☁️</div>
-            <div style={{ fontSize:15, fontWeight:600 }}>Loading your data from the cloud…</div>
+            <div style={{ fontSize:15, fontWeight:600 }}>Loading your data from Google Drive…</div>
             <div style={{ fontSize:12, marginTop:6 }}>This only takes a moment</div>
           </div>
         )}
@@ -1126,12 +1036,11 @@ function App({ authToken, onLogout }) {
                   return (
                     <div key={batch.id} style={{ background:"#FFFBEA", border:"1.5px solid #FFD166", borderRadius:12, padding:"10px 14px", marginBottom:8 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-                        <span style={{ fontSize:13 }}>{batch.cat.emoji}</span>
+                        <span>{batch.cat.emoji}</span>
                         <span style={{ fontSize:12, fontWeight:700, color:"#7A5200" }}>Give All — {batch.cat.label}</span>
                         <span style={{ fontSize:11, color:"#bbb" }}>{batch.time}</span>
                         <span style={{ fontSize:11, color:"#aaa", background:"#FFF3CD", borderRadius:5, padding:"1px 8px", border:"1px solid #FFD166" }}>{remainingCount} remaining</span>
-                        <button onClick={() => setGiveAllHistory(prev => prev.filter(b => b.id !== batch.id))}
-                          style={{ marginLeft:"auto", background:"none", border:"none", color:"#ccc", fontSize:13, cursor:"pointer" }}>✕</button>
+                        <button onClick={() => setGiveAllHistory(prev => prev.filter(b => b.id !== batch.id))} style={{ marginLeft:"auto", background:"none", border:"none", color:"#ccc", fontSize:13, cursor:"pointer" }}>✕</button>
                       </div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                         {students.map((s, i) => {
@@ -1139,9 +1048,8 @@ function App({ authToken, onLogout }) {
                           if (s.attendance !== "present") return null;
                           return (
                             <button key={i} onClick={() => { if (hasEntry) removeLogEntryByBatch(i, batch.id); }} disabled={!hasEntry}
-                              style={{ background: hasEntry ? "#FFF1F1" : "#F8FCF9", border: `1.5px solid ${hasEntry ? "#E05C5C70" : "#B8DDD0"}`, borderRadius:8, padding:"5px 12px", fontSize:12, cursor: hasEntry ? "pointer" : "default", color: hasEntry ? "#C0392B" : "#7EC8A4", fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
-                              <span>{hasEntry ? "↩" : "✓"}</span>
-                              {s.name}
+                              style={{ background: hasEntry ? "#FFF1F1" : "#F8FCF9", border:`1.5px solid ${hasEntry ? "#E05C5C70" : "#B8DDD0"}`, borderRadius:8, padding:"5px 12px", fontSize:12, cursor: hasEntry ? "pointer" : "default", color: hasEntry ? "#C0392B" : "#7EC8A4", fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
+                              <span>{hasEntry ? "↩" : "✓"}</span>{s.name}
                             </button>
                           );
                         })}
@@ -1159,20 +1067,14 @@ function App({ authToken, onLogout }) {
                 <span style={{ color:"#4C9B82", fontWeight:700, fontSize:13 }}>✅ {students.filter(s=>s.attendance==="present").length}</span>
                 <span style={{ color:"#E05C5C", fontWeight:700, fontSize:13 }}>❌ {students.filter(s=>s.attendance!=="present").length}</span>
                 <button onClick={() => { snapshot(); setStudents(prev => prev.map(s => ({ ...s, attendance:"present" }))); showUndoMsg("All marked present"); }}
-                  style={{ background:`${pc.accent}18`, color:pc.accent, border:`1px solid ${pc.accent}`, borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                  ✅ All Present
-                </button>
+                  style={{ background:`${pc.accent}18`, color:pc.accent, border:`1px solid ${pc.accent}`, borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ All Present</button>
                 <button onClick={() => { snapshot(); setStudents(prev => prev.map(s => ({ ...s, attendance:"absent" }))); }}
-                  style={{ background:"#FFF1F1", color:"#E05C5C", border:"1px solid #E05C5C60", borderRadius:8, padding:"4px 12px", fontSize:12, cursor:"pointer" }}>
-                  Clear
-                </button>
+                  style={{ background:"#FFF1F1", color:"#E05C5C", border:"1px solid #E05C5C60", borderRadius:8, padding:"4px 12px", fontSize:12, cursor:"pointer" }}>Clear</button>
                 <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
                   <span style={{ fontSize:11, color:"#aaa", fontWeight:600 }}>Sort:</span>
                   {[["roster","📋 Roster"],["first","A–Z First"],["last","A–Z Last"]].map(([val,label]) => (
                     <button key={val} onClick={() => setSortBy(val)}
-                      style={{ background:sortBy===val?"#1A1A2E":"white", color:sortBy===val?"white":"#666", border:`1.5px solid ${sortBy===val?"#1A1A2E":"#E0E4EC"}`, borderRadius:7, padding:"4px 10px", fontSize:11, fontWeight:sortBy===val?700:400, cursor:"pointer" }}>
-                      {label}
-                    </button>
+                      style={{ background:sortBy===val?"#1A1A2E":"white", color:sortBy===val?"white":"#666", border:`1.5px solid ${sortBy===val?"#1A1A2E":"#E0E4EC"}`, borderRadius:7, padding:"4px 10px", fontSize:11, fontWeight:sortBy===val?700:400, cursor:"pointer" }}>{label}</button>
                   ))}
                 </div>
               </div>
@@ -1183,21 +1085,17 @@ function App({ authToken, onLogout }) {
               </div>
             </div>
 
-            {/* ── GRID VIEW ── */}
+            {/* ── GRID ── */}
             {view === "grid" && (
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(155px, 1fr))", gap:10 }}>
-                {displayStudents.map((s) => {
-                  const i = s.origIdx;
-                  const badge = getBadge(s.points);
-                  const att = getAttendanceMeta(s.attendance);
-                  const flashCat = CATEGORIES.find(c => c.id === flashAll);
-                  const totalDisplay = (s.totalPoints || 0) + s.points;
+                {displayStudents.map(s => {
+                  const i = s.origIdx; const badge = getBadge(s.points); const att = getAttendanceMeta(s.attendance);
+                  const flashCat = CATEGORIES.find(c => c.id === flashAll); const totalDisplay = (s.totalPoints || 0) + s.points;
                   return (
                     <div key={i} style={{ background:flashAll?`${flashCat?.color}18`:getCardBg(s.points), border:`2px solid ${flashAll?flashCat?.color:selected===i?pc.accent:"#E8EBF0"}`, borderRadius:12, overflow:"hidden", transition:"all 0.15s", opacity:s.attendance==="absent"?0.65:1, position:"relative" }}>
                       <button onClick={e => { e.stopPropagation(); toggleAttendance(i); }}
                         style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"5px 10px", background:att.bg, border:"none", borderBottom:`1px solid ${att.border}30`, cursor:"pointer", fontSize:10, fontWeight:700, color:att.color }}>
-                        <span>{att.icon} {att.label}</span>
-                        <span style={{ fontSize:9, color:"#ccc" }}>tap</span>
+                        <span>{att.icon} {att.label}</span><span style={{ fontSize:9, color:"#ccc" }}>tap</span>
                       </button>
                       <div onClick={e => {
                         if (s.attendance !== "present") return;
@@ -1216,14 +1114,9 @@ function App({ authToken, onLogout }) {
                         {s.parentNote && <div style={{ fontSize:9, color:"#D4A017", marginTop:3 }}>📝 has note</div>}
                       </div>
                       <div style={{ display:"flex", justifyContent:"space-between", padding:"4px 10px 6px", borderTop:"1px solid #EEE" }}>
-                        <button onClick={e => { e.stopPropagation(); setShowLog(showLog===i?null:i); }}
-                          style={{ background:"none", border:"none", fontSize:10, color:"#888", cursor:"pointer", padding:0 }}>
-                          📋 {s.log.length}
-                        </button>
-                        <button onClick={e => { e.stopPropagation(); setEditNoteFor(i); setNoteText(s.parentNote||""); }}
-                          style={{ background:"none", border:"none", fontSize:10, color:"#D4A017", cursor:"pointer", padding:0 }}>✏️</button>
-                        <button onClick={e => { e.stopPropagation(); removeStudent(i); }}
-                          style={{ background:"none", border:"none", fontSize:10, color:"#ddd", cursor:"pointer", padding:0 }}>✕</button>
+                        <button onClick={e => { e.stopPropagation(); setShowLog(showLog===i?null:i); }} style={{ background:"none", border:"none", fontSize:10, color:"#888", cursor:"pointer", padding:0 }}>📋 {s.log.length}</button>
+                        <button onClick={e => { e.stopPropagation(); setEditNoteFor(i); setNoteText(s.parentNote||""); }} style={{ background:"none", border:"none", fontSize:10, color:"#D4A017", cursor:"pointer", padding:0 }}>✏️</button>
+                        <button onClick={e => { e.stopPropagation(); removeStudent(i); }} style={{ background:"none", border:"none", fontSize:10, color:"#ddd", cursor:"pointer", padding:0 }}>✕</button>
                       </div>
                       {showLog === i && s.log.length > 0 && (
                         <div style={{ padding:"0 10px 8px", fontSize:11, color:"#555" }}>
@@ -1239,8 +1132,7 @@ function App({ authToken, onLogout }) {
                                   </div>
                                   <div style={{ color:"#bbb", fontSize:9 }}>{entry.date} · {entry.time}</div>
                                 </div>
-                                <button onClick={e => { e.stopPropagation(); removeLogEntry(i, ei); }}
-                                  style={{ background:"#FFF1F1", border:"1px solid #E05C5C60", borderRadius:5, color:"#E05C5C", fontSize:10, fontWeight:700, padding:"2px 6px", cursor:"pointer", flexShrink:0 }}>↩</button>
+                                <button onClick={e => { e.stopPropagation(); removeLogEntry(i, ei); }} style={{ background:"#FFF1F1", border:"1px solid #E05C5C60", borderRadius:5, color:"#E05C5C", fontSize:10, fontWeight:700, padding:"2px 6px", cursor:"pointer", flexShrink:0 }}>↩</button>
                               </div>
                             );
                           })}
@@ -1252,7 +1144,7 @@ function App({ authToken, onLogout }) {
               </div>
             )}
 
-            {/* ── LEADERBOARD VIEW ── */}
+            {/* ── LEADERBOARD ── */}
             {view === "leaderboard" && (
               <div style={{ background:"white", borderRadius:14, overflow:"hidden", boxShadow:"0 4px 20px rgba(0,0,0,0.07)" }}>
                 <div style={{ padding:"12px 20px", background:"#F8F9FC", borderBottom:"1px solid #E8EBF0", display:"grid", gridTemplateColumns:"36px 1fr 70px 120px 90px", gap:10, fontSize:10, fontWeight:700, color:"#999", textTransform:"uppercase", letterSpacing:1 }}>
@@ -1260,8 +1152,7 @@ function App({ authToken, onLogout }) {
                 </div>
                 {sorted.map((s, rank) => {
                   const medal = rank===0?"🥇":rank===1?"🥈":rank===2?"🥉":null;
-                  const att = getAttendanceMeta(s.attendance);
-                  const totalDisplay = (s.totalPoints || 0) + s.points;
+                  const att = getAttendanceMeta(s.attendance); const totalDisplay = (s.totalPoints || 0) + s.points;
                   return (
                     <div key={s.origIdx} style={{ display:"grid", gridTemplateColumns:"36px 1fr 70px 120px 90px", gap:10, padding:"0 20px", borderBottom:"1px solid #F0F2F6", background:rank<3?"#FAFBFF":"white", alignItems:"center", opacity:s.attendance==="absent"?0.55:1 }}>
                       <div style={{ fontSize:14, textAlign:"center", padding:"12px 0" }}>{medal||<span style={{ color:"#ccc", fontSize:12 }}>{rank+1}</span>}</div>
@@ -1278,10 +1169,7 @@ function App({ authToken, onLogout }) {
                       </div>
                       <div style={{ textAlign:"center", fontSize:12, color:"#888" }}>{s.log.length}</div>
                       <div style={{ textAlign:"center", padding:"8px 0" }}>
-                        <button onClick={() => toggleAttendance(s.origIdx)}
-                          style={{ background:att.bg, border:`1px solid ${att.border}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:att.color, cursor:"pointer" }}>
-                          {att.icon} {att.label}
-                        </button>
+                        <button onClick={() => toggleAttendance(s.origIdx)} style={{ background:att.bg, border:`1px solid ${att.border}`, borderRadius:8, padding:"4px 10px", fontSize:11, fontWeight:700, color:att.color, cursor:"pointer" }}>{att.icon} {att.label}</button>
                       </div>
                       <div style={{ textAlign:"right", padding:"10px 0" }}>
                         <div style={{ fontWeight:800, fontSize:17, color:getPointColor(s.points) }}>{s.points>0?"+":""}{s.points}</div>
@@ -1298,28 +1186,19 @@ function App({ authToken, onLogout }) {
             <div style={{ marginTop:16, display:"flex", gap:10, flexWrap:"wrap" }}>
               {CATEGORIES.map(cat => {
                 const count = students.reduce((acc,s) => acc + s.log.filter(l=>l.label===cat.label).length, 0);
-                return (
-                  <div key={cat.id} style={{ background:"white", borderRadius:10, padding:"8px 14px", border:`1.5px solid ${cat.color}20`, fontSize:12, display:"flex", alignItems:"center", gap:6 }}>
-                    <span>{cat.emoji}</span>
-                    <span style={{ color:"#555" }}>{cat.label}</span>
-                    <span style={{ fontWeight:700, color:cat.color }}>{count}×</span>
-                  </div>
-                );
+                return (<div key={cat.id} style={{ background:"white", borderRadius:10, padding:"8px 14px", border:`1.5px solid ${cat.color}20`, fontSize:12, display:"flex", alignItems:"center", gap:6 }}><span>{cat.emoji}</span><span style={{ color:"#555" }}>{cat.label}</span><span style={{ fontWeight:700, color:cat.color }}>{count}×</span></div>);
               })}
             </div>
 
             {/* ── ABSENT LIST ── */}
             <div className="no-print" style={{ marginTop:14, background:"white", borderRadius:12, border:"1.5px solid #E05C5C30", padding:"12px 16px" }}>
-              <div style={{ fontSize:12, fontWeight:700, color:"#E05C5C", marginBottom:8 }}>
-                ❌ Absent / Unmarked — {activePeriod} ({students.filter(s=>s.attendance!=="present").length})
-              </div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#E05C5C", marginBottom:8 }}>❌ Absent / Unmarked — {activePeriod} ({students.filter(s=>s.attendance!=="present").length})</div>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                 {students.filter(s=>s.attendance!=="present").length===0 ? (
                   <div style={{ fontSize:12, color:"#aaa" }}>✅ All marked present</div>
                 ) : (
                   students.map((s,origI) => s.attendance!=="present" ? (
-                    <button key={origI} onClick={() => toggleAttendance(origI)}
-                      style={{ background:"#FFF1F1", border:"1px solid #E05C5C40", borderRadius:8, padding:"5px 12px", fontSize:12, cursor:"pointer" }}>
+                    <button key={origI} onClick={() => toggleAttendance(origI)} style={{ background:"#FFF1F1", border:"1px solid #E05C5C40", borderRadius:8, padding:"5px 12px", fontSize:12, cursor:"pointer" }}>
                       <span style={{ fontWeight:600, color:"#C0392B" }}>{s.name}</span>
                       <span style={{ color:"#aaa", fontSize:10, marginLeft:6 }}>tap → present</span>
                     </button>
@@ -1335,15 +1214,10 @@ function App({ authToken, onLogout }) {
       {selected !== null && popoverPos && ReactDOM.createPortal(
         <div ref={popoverRef} style={{
           position:"absolute",
-          top:(() => {
-            const panelH = 180;
-            const spaceBelow = document.documentElement.scrollHeight - (popoverPos.top + popoverPos.height);
-            return spaceBelow > panelH ? popoverPos.top + popoverPos.height + 6 : popoverPos.top - panelH - 6;
-          })(),
-          left: Math.min(Math.max(popoverPos.left, 8), window.innerWidth - 320),
-          width: Math.min(310, window.innerWidth - 16),
-          background:"white", borderRadius:12, border:`2px solid ${pc.accent}`,
-          padding:"10px 12px", boxShadow:"0 6px 24px rgba(0,0,0,0.15)", zIndex:1000,
+          top:(() => { const panelH=180; const spaceBelow=document.documentElement.scrollHeight-(popoverPos.top+popoverPos.height); return spaceBelow>panelH ? popoverPos.top+popoverPos.height+6 : popoverPos.top-panelH-6; })(),
+          left: Math.min(Math.max(popoverPos.left, 8), window.innerWidth-320),
+          width: Math.min(310, window.innerWidth-16),
+          background:"white", borderRadius:12, border:`2px solid ${pc.accent}`, padding:"10px 12px", boxShadow:"0 6px 24px rgba(0,0,0,0.15)", zIndex:1000,
         }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
             <div style={{ fontWeight:700, fontSize:12, color:pc.accent }}>
@@ -1374,10 +1248,7 @@ function App({ authToken, onLogout }) {
             </div>
           </div>
           <div style={{ marginTop:8, display:"flex", justifyContent:"flex-end" }}>
-            <button onClick={() => { setSelected(null); setPopoverPos(null); }}
-              style={{ background:pc.accent, color:"white", border:"none", borderRadius:7, padding:"5px 14px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-              Done
-            </button>
+            <button onClick={() => { setSelected(null); setPopoverPos(null); }} style={{ background:pc.accent, color:"white", border:"none", borderRadius:7, padding:"5px 14px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Done</button>
           </div>
         </div>,
         document.body
@@ -1411,8 +1282,8 @@ function App({ authToken, onLogout }) {
             <h3 style={{ margin:"0 0 6px", fontSize:16 }}>📝 Parent Note</h3>
             <div style={{ fontSize:13, color:"#888", marginBottom:14 }}>For <strong>{students[editNoteFor]?.name}</strong> · Appears on printed report</div>
             <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
-              placeholder="e.g. 'Called home 6/12. Parent aware of missing work.'"
-              rows={4} style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:14, resize:"vertical", outline:"none" }} />
+              placeholder="e.g. 'Called home 6/12. Parent aware of missing work.'" rows={4}
+              style={{ width:"100%", padding:"10px 12px", border:"2px solid #E0E4EC", borderRadius:10, fontSize:14, resize:"vertical", outline:"none" }} />
             <div style={{ display:"flex", gap:8, marginTop:14, justifyContent:"flex-end" }}>
               <button onClick={() => { setEditNoteFor(null); setNoteText(""); }} style={{ background:"none", border:"2px solid #E0E4EC", borderRadius:9, padding:"8px 18px", fontSize:13, cursor:"pointer" }}>Cancel</button>
               <button onClick={saveNote} style={{ background:"#4C9B82", color:"white", border:"none", borderRadius:9, padding:"8px 20px", fontSize:13, fontWeight:700, cursor:"pointer" }}>Save Note</button>
@@ -1435,30 +1306,16 @@ function App({ authToken, onLogout }) {
               ⚠️ This cannot be undone. Export your data first if you want a backup.
             </div>
             <div style={{ display:"flex", gap:10 }}>
-              <button onClick={() => setShowSemesterReset(false)}
-                style={{ flex:1, background:"none", border:"2px solid #E0E4EC", borderRadius:10, padding:"11px", fontSize:14, cursor:"pointer", color:"#666", fontWeight:600 }}>
-                Cancel
-              </button>
-              <button onClick={masterReset}
-                style={{ flex:1, background:"#E05C5C", color:"white", border:"none", borderRadius:10, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-                Yes, Reset Everything
-              </button>
+              <button onClick={() => setShowSemesterReset(false)} style={{ flex:1, background:"none", border:"2px solid #E0E4EC", borderRadius:10, padding:"11px", fontSize:14, cursor:"pointer", color:"#666", fontWeight:600 }}>Cancel</button>
+              <button onClick={masterReset} style={{ flex:1, background:"#E05C5C", color:"white", border:"none", borderRadius:10, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer" }}>Yes, Reset Everything</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── ROSTER IMPORT MODAL ── */}
-      {showRosterImport && (
-        <ImportRosterModal
-          onClose={() => setShowRosterImport(false)}
-          onImport={handleRosterImport}
-        />
-      )}
-
-      {/* ── REPORTS MODAL ── */}
+      {showRosterImport && <ImportRosterModal onClose={() => setShowRosterImport(false)} onImport={handleRosterImport} />}
       {showReport && ReactDOM.createPortal(
-        <ParentReportModal allPeriodData={allPeriodData} onClose={() => setShowReport(false)} onPrint={(html) => { window.triggerPrint(html); }} />,
+        <ParentReportModal allPeriodData={allPeriodData} onClose={() => setShowReport(false)} onPrint={html => { window.triggerPrint(html); }} />,
         document.body
       )}
     </div>
