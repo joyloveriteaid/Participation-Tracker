@@ -79,7 +79,7 @@ const CATEGORIES = [
   { id: "reasoning", label: "Answer + Reasoning",   emoji: "🧠", points: 1,  color: "#5B8DD9" },
   { id: "vocab",     label: "Question + Vocab",     emoji: "📚", points: 1,  color: "#9B6DD1" },
   { id: "sharework", label: "Share Work Publicly",  emoji: "🌟", points: 1,  color: "#D4A017" },
-  { id: "offtask",   label: "Off-Task Talking",     emoji: "🔇", points: -1, color: "#E05C5C" },
+  { id: "offtask",   label: "Off-Task/Talking",     emoji: "🔇", points: -1, color: "#E05C5C" },
 ];
 
 const DEFAULT_STUDENTS = {
@@ -453,23 +453,16 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                                   })}
                                 </div>
                               ) : (
-                                <div style={{ marginBottom:8 }}>
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
                                   {CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
                                     const count = s.log.filter(l => l.label === cat.label).length;
-                                    const catPtColor = cat.points > 0 ? "#2E7D5E" : "#C0392B";
                                     return (
-                                      <div key={cat.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                                        <div style={{ width:16, height:16, borderRadius:4, background:cat.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, flexShrink:0 }}>{cat.emoji}</div>
-                                        <div style={{ fontSize:11, color:"#555", flex:1 }}>{cat.label}</div>
-                                        <div style={{ fontSize:11, fontWeight:700, color:catPtColor, minWidth:24, textAlign:"right" }}>{cat.points > 0 ? "+" : ""}{cat.points * count}</div>
+                                      <div key={cat.id} style={{ background:cat.color + "18", border:`1px solid ${cat.color}40`, borderRadius:20, padding:"3px 10px", fontSize:13, display:"flex", alignItems:"center", gap:4 }}>
+                                        <span>{cat.emoji}</span>
+                                        {count > 1 && <span style={{ fontSize:10, fontWeight:700, color:cat.color }}>×{count}</span>}
                                       </div>
                                     );
                                   })}
-                                </div>
-                              )}
-                              {reportMode === "full" && (
-                                <div style={{ background:"#F8F9FC", borderRadius:8, padding:"8px 10px", fontSize:11, color:"#555", lineHeight:1.5, marginBottom:8 }}>
-                                  {getStarMessage(s)}
                                 </div>
                               )}
                               {reportMode === "full" && s.log.length > 0 && (
@@ -506,16 +499,53 @@ function ParentReportModal({ allPeriodData, onClose, onPrint }) {
                                   const dayPtColor = day.points > 0 ? "#2E7D5E" : day.points < 0 ? "#C0392B" : "#888";
                                   const dayPts = (day.points > 0 ? "+" : "") + day.points;
                                   const attendedCats = CATEGORIES.filter(c => (day.log||[]).some(l => l.label === c.label));
-                                  const dayCats = attendedCats.map(c => c.emoji).join(" ");
-                                  return (
-                                    <div key={di} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0", borderBottom:"1px solid #f5f5f5", fontSize:11 }}>
-                                      <span style={{ color:"#999", minWidth:68, fontSize:10, flexShrink:0 }}>{day.date}</span>
-                                      <span style={{ fontSize:12 }}>{day.attendance === "present" ? "✅" : "❌"}</span>
-                                      <span style={{ flex:1, color:"#888", fontSize:12, letterSpacing:2 }}>{dayCats || "—"}</span>
-                                      <span style={{ fontWeight:700, color:dayPtColor, minWidth:28, textAlign:"right" }}>{dayPts}</span>
-                                    </div>
-                                  );
+                                  if (showAll) {
+                                    return (
+                                      <div key={di} style={{ padding:"6px 0", borderBottom:"1px solid #f0f0f0" }}>
+                                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                                          <span style={{ fontWeight:700, fontSize:11, color:"#333" }}>{day.date}</span>
+                                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                            <span style={{ fontSize:11, color: day.attendance === "present" ? "#4C9B82" : "#E05C5C", fontWeight:600 }}>{day.attendance === "present" ? "Present" : "Absent"}</span>
+                                            <span style={{ fontWeight:700, color:dayPtColor, fontSize:12 }}>{dayPts} pts</span>
+                                          </div>
+                                        </div>
+                                        {(day.log||[]).length > 0 ? (
+                                          <div style={{ borderLeft:"2px solid #E8EBF0", paddingLeft:8, marginTop:2 }}>
+                                            {(day.log||[]).map((entry, ei) => {
+                                              const ec = entry.pts > 0 ? "#2E7D5E" : "#C0392B";
+                                              return (
+                                                <div key={ei} style={{ display:"flex", alignItems:"center", gap:6, padding:"2px 0", fontSize:11 }}>
+                                                  <span>{entry.emoji}</span>
+                                                  <span style={{ flex:1, color:"#555" }}>{entry.label}</span>
+                                                  <span style={{ color:ec, fontWeight:700 }}>{entry.pts > 0 ? "+" : ""}{entry.pts}</span>
+                                                  <span style={{ color:"#bbb", fontSize:10, minWidth:36, textAlign:"right" }}>{entry.time}</span>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : (
+                                          <div style={{ fontSize:11, color:"#bbb", paddingLeft:8 }}>No activity recorded</div>
+                                        )}
+                                      </div>
+                                    );
+                                  } else {
+                                    const dayCats = attendedCats.map(c => c.emoji).join(" ");
+                                    return (
+                                      <div key={di} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0", borderBottom:"1px solid #f5f5f5", fontSize:11 }}>
+                                        <span style={{ color:"#999", minWidth:68, fontSize:10, flexShrink:0 }}>{day.date}</span>
+                                        <span style={{ fontSize:12 }}>{day.attendance === "present" ? "✅" : "❌"}</span>
+                                        <span style={{ flex:1, color:"#888", fontSize:12, letterSpacing:2 }}>{dayCats || "—"}</span>
+                                        <span style={{ fontWeight:700, color:dayPtColor, minWidth:28, textAlign:"right" }}>{dayPts}</span>
+                                      </div>
+                                    );
+                                  }
                                 })}
+                                {showAll && (
+                                  <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", fontSize:12, fontWeight:700, borderTop:"1px solid #E8EBF0", marginTop:4 }}>
+                                    <span style={{ color:"#555" }}>Cumulative total ({hist.length} days)</span>
+                                    <span style={{ color:"#9B6DD1" }}>{(s.totalPoints||0) + s.points} pts</span>
+                                  </div>
+                                )}
                               </div>
                             );
                           })()}
@@ -1177,34 +1207,46 @@ function App() {
         <div ref={popoverRef} style={{
           position:"absolute",
           top:(() => {
-            const panelH = 210;
+            const panelH = 180;
             const spaceBelow = document.documentElement.scrollHeight - (popoverPos.top + popoverPos.height);
-            return spaceBelow > panelH ? popoverPos.top + popoverPos.height + 8 : popoverPos.top - panelH - 8;
+            return spaceBelow > panelH ? popoverPos.top + popoverPos.height + 6 : popoverPos.top - panelH - 6;
           })(),
-          left: Math.min(Math.max(popoverPos.left, 12), window.innerWidth - 352),
-          width: Math.min(340, window.innerWidth - 24),
-          background:"white", borderRadius:14, border:`2px solid ${pc.accent}`,
-          padding:16, boxShadow:"0 8px 32px rgba(0,0,0,0.18)", zIndex:1000,
+          left: Math.min(Math.max(popoverPos.left, 8), window.innerWidth - 320),
+          width: Math.min(310, window.innerWidth - 16),
+          background:"white", borderRadius:12, border:`2px solid ${pc.accent}`,
+          padding:"10px 12px", boxShadow:"0 6px 24px rgba(0,0,0,0.15)", zIndex:1000,
         }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:pc.accent }}>
-              🏅 Award → {students[selected]?.name}
-              <span style={{ background:pc.bg, color:pc.text, fontSize:10, borderRadius:5, padding:"2px 8px", marginLeft:8 }}>{activePeriod}</span>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <div style={{ fontWeight:700, fontSize:12, color:pc.accent }}>
+              🏅 {students[selected]?.name}
+              <span style={{ background:pc.bg, color:pc.text, fontSize:9, borderRadius:4, padding:"1px 6px", marginLeft:6 }}>{activePeriod}</span>
             </div>
-            <button onClick={() => { setSelected(null); setPopoverPos(null); }} style={{ background:"none", border:"none", fontSize:17, cursor:"pointer", color:"#aaa" }}>✕</button>
+            <button onClick={() => { setSelected(null); setPopoverPos(null); }} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:"#aaa" }}>✕</button>
           </div>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            {CATEGORIES.map(cat => (
-              <button key={cat.id} onClick={e => { e.stopPropagation(); award(selected, cat); }}
-                style={{ background:cat.color, color:"white", border:"none", borderRadius:9, padding:"8px 13px", fontSize:12, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:5, boxShadow:"0 2px 8px rgba(0,0,0,0.12)" }}>
-                {cat.emoji} {cat.label}
-                <span style={{ background:"rgba(255,255,255,0.25)", borderRadius:5, padding:"1px 6px", fontSize:11 }}>{cat.points>0?"+":""}{cat.points}</span>
-              </button>
-            ))}
+          <div style={{ display:"flex", gap:6, alignItems:"flex-start" }}>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap", flex:1 }}>
+              {CATEGORIES.filter(c => c.id !== "offtask").map(cat => (
+                <button key={cat.id} onClick={e => { e.stopPropagation(); award(selected, cat); }}
+                  style={{ background:cat.color, color:"white", border:"none", borderRadius:7, padding:"5px 9px", fontSize:11, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:4, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>
+                  {cat.emoji} {cat.label}
+                  <span style={{ background:"rgba(255,255,255,0.25)", borderRadius:4, padding:"1px 4px", fontSize:10 }}>+{cat.points}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ width:1, background:"#E8EBF0", alignSelf:"stretch", margin:"0 2px" }} />
+            <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+              {[{ id:"offtask", label:"Off-Task/Talking", emoji:"🔇", points:-1, color:"#E05C5C" }, { id:"device", label:"Device", emoji:"📱", points:-1, color:"#888" }].map(cat => (
+                <button key={cat.id} onClick={e => { e.stopPropagation(); award(selected, cat); }}
+                  style={{ background:cat.color, color:"white", border:"none", borderRadius:7, padding:"5px 9px", fontSize:11, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:4, boxShadow:"0 1px 4px rgba(0,0,0,0.12)", whiteSpace:"nowrap" }}>
+                  {cat.emoji} {cat.label}
+                  <span style={{ background:"rgba(255,255,255,0.25)", borderRadius:4, padding:"1px 4px", fontSize:10 }}>{cat.points}</span>
+                </button>
+              ))}
+            </div>
           </div>
-          <div style={{ marginTop:12, display:"flex", justifyContent:"flex-end" }}>
+          <div style={{ marginTop:8, display:"flex", justifyContent:"flex-end" }}>
             <button onClick={() => { setSelected(null); setPopoverPos(null); }}
-              style={{ background:pc.accent, color:"white", border:"none", borderRadius:9, padding:"7px 20px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              style={{ background:pc.accent, color:"white", border:"none", borderRadius:7, padding:"5px 14px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
               Done
             </button>
           </div>
