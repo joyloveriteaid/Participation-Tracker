@@ -184,21 +184,31 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
     const ptStr = (s.points > 0 ? "+" : "") + s.points;
     const totalPts = (s.totalPoints || 0) + s.points;
 
-    const catRows = CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
+    // Category icons (same for both modes)
+    const catIcons = CATEGORIES.filter(c => s.log.some(l => l.label === c.label)).map(cat => {
       const count = s.log.filter(l => l.label === cat.label).length;
-      const ptVal = (cat.points > 0 ? "+" : "") + (cat.points * count);
-      const ptC = cat.points > 0 ? "#2E7D5E" : "#C0392B";
-      return `<div style="display:flex;gap:8px;margin-bottom:5px;align-items:center"><span>${cat.emoji}</span><span style="font-size:11px;color:#555;flex:1">${cat.label}</span><span style="font-size:11px;font-weight:700;color:${ptC}">${ptVal}</span></div>`;
+      return `<div style="background:${cat.color}18;border:1px solid ${cat.color}40;border-radius:20px;padding:3px 10px;font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:2px">${cat.emoji}${count > 1 ? `<span style="font-size:10px;font-weight:700;color:${cat.color}">×${count}</span>` : ""}</div>`;
     }).join("");
 
+    // Today's activity log
+    const todayLog = reportMode === "full" && s.log.length > 0
+      ? `<div style="border-top:1px solid #F0F2F6;padding-top:8px;margin-top:6px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Activity Log</div>${s.log.map(e => {
+          const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B";
+          return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px;border-bottom:1px solid #f5f5f5"><span>${e.emoji}</span><span style="flex:1;color:#555">${e.label}</span><span style="color:${ec};font-weight:700">${e.pts > 0 ? "+" : ""}${e.pts}</span><span style="color:#bbb;font-size:10px;min-width:40px;text-align:right">${e.time}</span></div>`;
+        }).join("")}</div>` : "";
+
+    // History
     const histDisplayed = reportMode === "full" ? (s.history || []) : (s.history || []).slice(0, 3);
     const historyRows = histDisplayed.map(function(day) {
       const dayPtColor = day.points > 0 ? "#2E7D5E" : day.points < 0 ? "#C0392B" : "#888";
       const dayPts = (day.points > 0 ? "+" : "") + day.points;
       const attendedCats = CATEGORIES.filter(c => (day.log||[]).some(l => l.label === c.label));
       if (reportMode === "full") {
-        const actLines = attendedCats.map(c => { const count = (day.log||[]).filter(l=>l.label===c.label).length; return c.label+(count>1?` (${count}x)`:""); });
-        return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-weight:600;font-size:11px;color:#333">${day.date}</span><div style="display:flex;align-items:center;gap:10px"><span style="font-size:11px;color:${day.attendance==="present"?"#4C9B82":"#E05C5C"};font-weight:600">${day.attendance==="present"?"Present":"Absent"}</span><span style="font-weight:700;color:${dayPtColor};font-size:12px">${dayPts} pts</span></div></div><div style="font-size:11px;color:${actLines.length>0?"#555":"#bbb"};line-height:1.5">${actLines.join(", ")||"No participation recorded"}</div></div>`;
+        const dayLogRows = (day.log||[]).map(e => {
+          const ec = e.pts > 0 ? "#2E7D5E" : "#C0392B";
+          return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px"><span>${e.emoji}</span><span style="flex:1;color:#555">${e.label}</span><span style="color:${ec};font-weight:700">${e.pts > 0 ? "+" : ""}${e.pts}</span><span style="color:#bbb;font-size:10px;min-width:40px;text-align:right">${e.time}</span></div>`;
+        }).join("");
+        return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:700;font-size:11px;color:#333">${day.date}</span><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:${day.attendance==="present"?"#4C9B82":"#E05C5C"};font-weight:600">${day.attendance==="present"?"Present":"Absent"}</span><span style="font-weight:700;color:${dayPtColor};font-size:12px">${dayPts} pts</span></div></div><div style="border-left:2px solid #E8EBF0;padding-left:8px">${dayLogRows||`<div style="font-size:11px;color:#bbb">No activity recorded</div>`}</div></div>`;
       } else {
         const dayCats = attendedCats.map(c=>c.emoji).join(" ");
         return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f0;font-size:11px"><span style="color:#999;min-width:68px;font-size:10px;flex-shrink:0">${day.date}</span><span style="font-size:12px">${day.attendance==="present"?"✅":"❌"}</span><span style="flex:1;color:#888;font-size:12px;letter-spacing:2px">${dayCats||"—"}</span><span style="font-weight:700;color:${dayPtColor};min-width:28px;text-align:right">${dayPts}</span></div>`;
@@ -206,13 +216,15 @@ function buildPrintHTML(allPeriodData, selectedPeriod, reportMode, teacherName, 
     }).join("");
 
     const histLabel = reportMode==="full" ? `History (${(s.history||[]).length} days)` : `Recent History (last ${histDisplayed.length} of ${(s.history||[]).length} days)`;
+    const cumTotal = reportMode==="full" && (s.history||[]).length > 0
+      ? `<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-size:12px;font-weight:700;border-top:1px solid #E8EBF0;margin-top:4px"><span style="color:#555">Cumulative total (${(s.history||[]).length} days)</span><span style="color:#9B6DD1">${totalPts} pts</span></div>` : "";
     const historySection = (s.history||[]).length > 0
-      ? `<div style="border-top:2px solid #E8EBF0;margin-top:10px;padding-top:8px"><div style="font-size:10px;font-weight:700;color:#9B6DD1;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">📅 ${histLabel}</div>${historyRows}${reportMode==="full"?`<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-size:12px;font-weight:700;border-top:1px solid #E8EBF0;margin-top:4px"><span style="color:#555">Cumulative total</span><span style="color:#9B6DD1">${totalPts} pts</span></div>`:""}</div>` : "";
+      ? `<div style="border-top:2px solid #E8EBF0;margin-top:10px;padding-top:8px"><div style="font-size:10px;font-weight:700;color:#9B6DD1;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">📅 ${histLabel}</div>${historyRows}${cumTotal}</div>` : "";
 
     const noteHTML = s.parentNote ? `<div style="background:#FFFBEA;border:1px solid #FFD166;border-radius:6px;padding:6px 10px;font-size:11px;color:#7A5200;margin-top:8px"><b>Note:</b> ${s.parentNote}</div>` : "";
     const noActivity = s.log.length === 0 ? `<div style="font-size:12px;color:#bbb;text-align:center;padding:8px">No activity today</div>` : "";
 
-    return `<div style="background:white;border:1.5px solid #E8EBF0;border-radius:10px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;margin-bottom:4px"><div style="background:${pc.bg};padding:10px 14px;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:10px"><div style="width:34px;height:34px;border-radius:50%;background:${pc.accent};color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">${initials}</div><div><div style="font-weight:700;font-size:14px;color:${pc.text}">${s.name}</div><div style="font-size:11px;color:${pc.accent}">${period} · ${att.icon} ${att.label}</div></div></div><div style="text-align:right"><div style="font-size:22px;font-weight:800;color:${ptColor}">${ptStr}</div><div style="font-size:9px;color:#aaa">today</div><div style="font-size:13px;font-weight:700;color:#9B6DD1">${totalPts} total</div></div></div><div style="padding:10px 14px">${noActivity}${catRows}${historySection}${noteHTML}</div><div style="background:#F8F9FC;border-top:1px solid #F0F2F6;padding:6px 14px;display:flex;justify-content:space-between"><span style="font-size:10px;color:#bbb">${((s.history||[]).length+(s.points!==0||s.log.length>0||s.attendance==="present"?1:0))} days tracked</span><span style="font-size:10px;color:#bbb">${className} · ${period}</span></div></div>`;
+    return `<div style="background:white;border:1.5px solid #E8EBF0;border-radius:10px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;margin-bottom:4px"><div style="background:${pc.bg};padding:10px 14px;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:10px"><div style="width:34px;height:34px;border-radius:50%;background:${pc.accent};color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">${initials}</div><div><div style="font-weight:700;font-size:14px;color:${pc.text}">${s.name}</div><div style="font-size:11px;color:${pc.accent}">${period} · ${att.icon} ${att.label}</div></div></div><div style="text-align:right"><div style="font-size:22px;font-weight:800;color:${ptColor}">${ptStr}</div><div style="font-size:9px;color:#aaa">today</div><div style="font-size:13px;font-weight:700;color:#9B6DD1">${totalPts} total</div></div></div><div style="padding:10px 14px">${noActivity}<div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:6px">${catIcons}</div>${todayLog}${historySection}${noteHTML}</div><div style="background:#F8F9FC;border-top:1px solid #F0F2F6;padding:6px 14px;display:flex;justify-content:space-between"><span style="font-size:10px;color:#bbb">${((s.history||[]).length+(s.points!==0||s.log.length>0||s.attendance==="present"?1:0))} days tracked</span><span style="font-size:10px;color:#bbb">${className} · ${period}</span></div></div>`;
   }).join("");
 
   return `<h1 style="font-size:20px;font-weight:800;margin:0 0 4px">${className} — Participation Reports</h1><div style="font-size:13px;color:#888;margin-bottom:20px">${teacherName} · ${dateLabel}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">${cards}</div>`;
