@@ -125,14 +125,14 @@ async function driveRevokeToken(token) {
 
 // ── OAuth implicit flow ───────────────────────────────────────────────────────
 
-function buildAuthUrl(nonce) {
+function buildAuthUrl(nonce, silent) {
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: window.location.origin + window.location.pathname,
     response_type: "token",
     scope: DRIVE_SCOPE,
     state: nonce,
-    prompt: "select_account",
+    prompt: silent ? "none" : "select_account",
   });
   return "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString();
 }
@@ -144,11 +144,49 @@ function parseHashToken() {
   const expiresIn = params.get("expires_in");
   const state = params.get("state");
   if (token) {
-    // Clean URL
     window.history.replaceState(null, "", window.location.pathname);
     return { token, expiresIn: parseInt(expiresIn || "3600", 10), state };
   }
   return null;
+}
+
+// Silent token refresh via hidden iframe — no page redirect, no user interaction
+function silentRefreshToken() {
+  return new Promise((resolve) => {
+    const nonce = Math.random().toString(36).slice(2);
+    const url = buildAuthUrl(nonce, true);
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;";
+    iframe.src = url;
+    let resolved = false;
+    const cleanup = (token) => {
+      if (resolved) return;
+      resolved = true;
+      try { document.body.removeChild(iframe); } catch(e) {}
+      resolve(token);
+    };
+    iframe.onload = () => {
+      try {
+        const hash = iframe.contentWindow.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const token = params.get("access_token");
+        const expiresIn = parseInt(params.get("expires_in") || "3600", 10);
+        const state = params.get("state");
+        if (token && state === nonce) {
+          const expiry = Date.now() + expiresIn * 1000;
+          sessionStorage.setItem(TOKEN_KEY, token);
+          sessionStorage.setItem(TOKEN_EXP_KEY, expiry.toString());
+          cleanup(token);
+        } else {
+          cleanup(null);
+        }
+      } catch(e) {
+        cleanup(null);
+      }
+    };
+    setTimeout(() => cleanup(null), 8000);
+    document.body.appendChild(iframe);
+  });
 }
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
@@ -667,11 +705,14 @@ function Root() {
   }
 
   if (!authToken) return <LoginScreen />;
-  return <App authToken={authToken} onLogout={handleLogout} />;
+  const handleTokenRefresh = (newToken) => {
+    setAuthToken(newToken);
+  };
+  return <App authToken={authToken} onLogout={handleLogout} onTokenRefresh={handleTokenRefresh} />;
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-function App({ authToken, onLogout }) {
+function App({ authToken, onLogout, onTokenRefresh }) {
   const [activePeriod, setActivePeriod] = useState("P1");
   const [allPeriodData, setAllPeriodData] = useState(buildDefaultAllData);
   const [cloudStatus, setCloudStatus] = useState("loading"); // loading | synced | saving | error
@@ -745,18 +786,36 @@ function App({ authToken, onLogout }) {
     })();
   }, []);
 
-  // ── AUTO-SAVE TO DRIVE (debounced 1.5s) ──────────────────────────────────
+  // ── AUTO-SAVE TO DRIVE (debounced 1.5s, with silent token refresh on failure) ─
   useEffect(() => {
     if (isFirstLoad.current) { isFirstLoad.current = false; return; }
     setCloudStatus("saving");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      // Also save to localStorage as backup
       PERIODS.forEach(p => savePeriodDataLocal(p, allPeriodData[p] || []));
       const today = getTodayDateStr();
       setLastActiveDate(today);
       const payload = { periods: allPeriodData, lastDate: today, savedAt: new Date().toISOString() };
-      const resultId = await driveSave(authToken, payload, driveFileIdRef.current);
+
+      let token = authToken;
+      // Check if token is close to expiry (within 5 min), refresh proactively
+      const expiry = parseInt(sessionStorage.getItem(TOKEN_EXP_KEY) || "0", 10);
+      if (expiry - Date.now() < 5 * 60 * 1000) {
+        const fresh = await silentRefreshToken();
+        if (fresh) { token = fresh; onTokenRefresh(fresh); }
+      }
+
+      let resultId = await driveSave(token, payload, driveFileIdRef.current);
+
+      // If save failed, try one silent refresh and retry
+      if (!resultId) {
+        const fresh = await silentRefreshToken();
+        if (fresh) {
+          onTokenRefresh(fresh);
+          resultId = await driveSave(fresh, payload, driveFileIdRef.current);
+        }
+      }
+
       if (resultId) {
         if (!driveFileIdRef.current) {
           setDriveFileId(resultId);
