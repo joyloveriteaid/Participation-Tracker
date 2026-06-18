@@ -532,6 +532,7 @@ function App() {
   const [giveAllHistory, setGiveAllHistory] = useState([]);
   const [showEndDayConfirm, setShowEndDayConfirm] = useState(false);
   const [showRosterImport, setShowRosterImport] = useState(false);
+  const [sortBy, setSortBy] = useState("roster"); // roster | first | last
   const saveTimerRef = useRef(null);
   const isFirstLoad = useRef(true);
 
@@ -798,7 +799,15 @@ function App() {
     return { p, present: d.filter(s=>s.attendance==="present").length, total:d.length, pts:d.reduce((a,s)=>a+s.points,0), total_pts:d.reduce((a,s)=>a+(s.totalPoints||0)+s.points,0) };
   });
 
-  const sorted = [...students].map((s,i) => ({ ...s, origIdx:i })).sort((a,b) => b.points - a.points);
+  const getLastName = (name) => { const parts = name.trim().split(/[, ]+/); return parts[0].toLowerCase(); };
+  const getFirstName = (name) => { const parts = name.trim().split(/[, ]+/); return (parts.length > 1 ? parts[parts.length-1] : parts[0]).toLowerCase(); };
+  const sortStudents = (arr) => {
+    if (sortBy === "first") return [...arr].sort((a,b) => getFirstName(a.name).localeCompare(getFirstName(b.name)));
+    if (sortBy === "last")  return [...arr].sort((a,b) => getLastName(a.name).localeCompare(getLastName(b.name)));
+    return arr; // roster order
+  };
+  const displayStudents = sortStudents(students.map((s,i) => ({ ...s, origIdx:i })));
+  const sorted = [...displayStudents].sort((a,b) => b.points - a.points);
 
   // Cloud status display
   const cloudStatusDisplay = {
@@ -968,6 +977,15 @@ function App() {
                   style={{ background:"#FFF1F1", color:"#E05C5C", border:"1px solid #E05C5C60", borderRadius:8, padding:"4px 12px", fontSize:12, cursor:"pointer" }}>
                   Clear
                 </button>
+                <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
+                  <span style={{ fontSize:11, color:"#aaa", fontWeight:600 }}>Sort:</span>
+                  {[["roster","📋 Roster"],["first","A–Z First"],["last","A–Z Last"]].map(([val,label]) => (
+                    <button key={val} onClick={() => setSortBy(val)}
+                      style={{ background:sortBy===val?"#1A1A2E":"white", color:sortBy===val?"white":"#666", border:`1.5px solid ${sortBy===val?"#1A1A2E":"#E0E4EC"}`, borderRadius:7, padding:"4px 10px", fontSize:11, fontWeight:sortBy===val?700:400, cursor:"pointer" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div style={{ display:"flex", gap:8, flexShrink:0 }}>
                 <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key==="Enter" && addStudent()}
@@ -979,7 +997,8 @@ function App() {
             {/* ── GRID VIEW ── */}
             {view === "grid" && (
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(155px, 1fr))", gap:10 }}>
-                {students.map((s, i) => {
+                {displayStudents.map((s) => {
+                  const i = s.origIdx;
                   const badge = getBadge(s.points);
                   const att = getAttendanceMeta(s.attendance);
                   const flashCat = CATEGORIES.find(c => c.id === flashAll);
