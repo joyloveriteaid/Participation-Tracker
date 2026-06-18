@@ -751,17 +751,13 @@ function App() {
     snapshot();
     const newData = {};
     PERIODS.forEach(p => {
-      // Merge: keep existing students not in new roster, add new ones
-      const existing = allPeriodData[p] || [];
       const incoming = rosterByPeriod[p] || [];
-      if (incoming.length === 0) { newData[p] = existing; return; }
-      const existingNames = new Set(existing.map(s => s.name.toLowerCase()));
-      const newStudents = incoming.filter(s => !existingNames.has(s.name.toLowerCase()));
-      newData[p] = [...existing, ...newStudents];
+      if (incoming.length === 0) { newData[p] = allPeriodData[p] || []; return; }
+      newData[p] = incoming;
       savePeriodDataLocal(p, newData[p]);
     });
     setAllPeriodData(newData);
-    showUndoMsg("Roster imported successfully");
+    showUndoMsg("Roster imported — existing students replaced");
   };
 
   const exportData = () => {
