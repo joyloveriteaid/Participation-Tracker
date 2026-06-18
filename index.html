@@ -34,13 +34,17 @@ const DRIVE_FILE_NAME = "participation-tracker-data.json";
 // ── Drive helpers ─────────────────────────────────────────────────────────────
 
 async function driveGetFileId(token) {
-  // Search in appDataFolder for our file
   const res = await fetch(
     `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27${encodeURIComponent(DRIVE_FILE_NAME)}%27&fields=files(id)`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    console.error("[Drive getFileId]", res.status, err);
+    return null;
+  }
   const json = await res.json();
+  console.log("[Drive getFileId] result:", JSON.stringify(json));
   return json.files && json.files.length > 0 ? json.files[0].id : null;
 }
 
@@ -59,31 +63,60 @@ async function driveLoad(token) {
 
 async function driveSave(token, data, existingFileId) {
   try {
-    const body = JSON.stringify(data);
-    const blob = new Blob([body], { type: "application/json" });
+    const bodyStr = JSON.stringify(data);
 
     if (existingFileId) {
-      // PATCH existing file
+      // PATCH existing file — simple media upload
       const res = await fetch(
         `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
-        { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body }
+        { method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: bodyStr }
       );
-      return res.ok ? existingFileId : null;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("[Drive PATCH]", res.status, err);
+        return null;
+      }
+      return existingFileId;
     } else {
-      // Create new file in appDataFolder
+      // Create new file — manual multipart so Content-Type boundary is explicit
+      const boundary = "pt_boundary_" + Date.now();
       const meta = JSON.stringify({ name: DRIVE_FILE_NAME, parents: ["appDataFolder"] });
-      const form = new FormData();
-      form.append("metadata", new Blob([meta], { type: "application/json" }));
-      form.append("file", blob);
+      const multipart = [
+        `--${boundary}`,
+        "Content-Type: application/json; charset=UTF-8",
+        "",
+        meta,
+        `--${boundary}`,
+        "Content-Type: application/json",
+        "",
+        bodyStr,
+        `--${boundary}--`,
+      ].join("\r\n");
+
       const res = await fetch(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
-        { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": `multipart/related; boundary=${boundary}`,
+          },
+          body: multipart,
+        }
       );
-      if (!res.ok) return null;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("[Drive CREATE]", res.status, err);
+        return null;
+      }
       const json = await res.json();
+      console.log("[Drive CREATE] success, fileId:", json.id);
       return json.id || null;
     }
-  } catch(e) { return null; }
+  } catch(e) {
+    console.error("[Drive save exception]", e);
+    return null;
+  }
 }
 
 async function driveRevokeToken(token) {
